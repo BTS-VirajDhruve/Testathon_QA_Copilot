@@ -1,0 +1,500 @@
+"""In-memory / JSON-persisted graph store with Neo4j-compatible interface."""
+
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+from typing import Any, Protocol
+
+from app.core.config import get_settings
+from app.core.logging import get_logger
+from app.models.enums import NodeType, RelationshipType, SourceType
+from app.models.schemas import (
+    GraphEdge,
+    GraphNode,
+    GraphPath,
+    Provenance,
+    SystemFlowGraph,
+    utc_now,
+)
+
+logger = get_logger(__name__)
+
+
+class GraphStoreProtocol(Protocol):
+    def upsert_node(self, node: GraphNode) -> GraphNode: ...
+    def upsert_edge(self, edge: GraphEdge) -> GraphEdge: ...
+    def get_node(self, node_id: str) -> GraphNode | None: ...
+    def get_project_graph(self, project_id: str) -> SystemFlowGraph: ...
+    def save_project_graph(self, graph: SystemFlowGraph) -> SystemFlowGraph: ...
+    def find_nodes(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        node_type: NodeType | None = None,
+    ) -> list[GraphNode]: ...
+    def neighbors(
+        self,
+        node_id: str,
+        *,
+        direction: str = "outgoing",
+        relationship: str | None = None,
+    ) -> list[tuple[GraphEdge, GraphNode]]: ...
+    def discover_paths(
+        self,
+        project_id: str,
+        root_id: str,
+        *,
+        max_depth: int = 8,
+    ) -> list[GraphPath]: ...
+    def impact_subgraph(self, node_id: str, *, max_depth: int = 4) -> dict[str, Any]: ...
+
+
+class InMemoryGraphStore:
+    """Persistent JSON graph store — primary implementation for hackathon demo."""
+
+    def __init__(self, path: str | None = None) -> None:
+        settings = get_settings()
+        self.path = Path(path or settings.graph_store_path)
+        self._lock = threading.RLock()
+        self.nodes: dict[str, GraphNode] = {}
+        self.edges: dict[str, GraphEdge] = {}
+        self.projects: dict[str, dict[str, Any]] = {}
+        self.documents: dict[str, dict[str, Any]] = {}
+        self.test_cases: dict[str, dict[str, Any]] = {}
+        self.bugs: dict[str, dict[str, Any]] = {}
+        self.graph_versions: dict[str, list[dict[str, Any]]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            self.nodes = {k: GraphNode.model_validate(v) for k, v in raw.get("nodes", {}).items()}
+            self.edges = {k: GraphEdge.model_validate(v) for k, v in raw.get("edges", {}).items()}
+            self.projects = raw.get("projects", {})
+            self.documents = raw.get("documents", {})
+            self.test_cases = raw.get("test_cases", {})
+            self.bugs = raw.get("bugs", {})
+            self.graph_versions = raw.get("graph_versions", {})
+            logger.info(
+                "graph_store_loaded",
+                nodes=len(self.nodes),
+                edges=len(self.edges),
+                projects=len(self.projects),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("graph_store_load_failed", error=str(exc))
+
+    def persist(self) -> None:
+        with self._lock:
+            payload = {
+                "nodes": {k: v.model_dump(mode="json") for k, v in self.nodes.items()},
+                "edges": {k: v.model_dump(mode="json") for k, v in self.edges.items()},
+                "projects": self.projects,
+                "documents": self.documents,
+                "test_cases": self.test_cases,
+                "bugs": self.bugs,
+                "graph_versions": self.graph_versions,
+            }
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp.replace(self.path)
+
+    def upsert_node(self, node: GraphNode) -> GraphNode:
+        with self._lock:
+            existing = self.nodes.get(node.id)
+            if existing and existing.provenance.source_type == SourceType.USER_INPUT:
+                # Never silently overwrite user-created node facts with inferred data
+                if node.provenance.source_type != SourceType.USER_INPUT:
+                    logger.info("preserve_user_node", node_id=node.id)
+                    return existing
+            node.updated_at = utc_now()
+            self.nodes[node.id] = node
+            self.persist()
+            return node
+
+    def upsert_edge(self, edge: GraphEdge) -> GraphEdge:
+        with self._lock:
+            # Idempotent: same source/target/relationship merges
+            for existing in self.edges.values():
+                if (
+                    existing.source == edge.source
+                    and existing.target == edge.target
+                    and str(existing.relationship) == str(edge.relationship)
+                ):
+                    if (
+                        existing.provenance.source_type == SourceType.USER_INPUT
+                        and edge.provenance.source_type != SourceType.USER_INPUT
+                    ):
+                        return existing
+                    # Prefer non-inferred / higher confidence
+                    if existing.provenance.inferred and not edge.provenance.inferred:
+                        self.edges[existing.id] = edge.model_copy(update={"id": existing.id})
+                        self.persist()
+                        return self.edges[existing.id]
+                    return existing
+            self.edges[edge.id] = edge
+            self.persist()
+            return edge
+
+    def delete_node(self, node_id: str) -> bool:
+        with self._lock:
+            if node_id not in self.nodes:
+                return False
+            del self.nodes[node_id]
+            self.edges = {
+                eid: e
+                for eid, e in self.edges.items()
+                if e.source != node_id and e.target != node_id
+            }
+            self.persist()
+            return True
+
+    def delete_edge(self, edge_id: str) -> bool:
+        with self._lock:
+            if edge_id not in self.edges:
+                return False
+            del self.edges[edge_id]
+            self.persist()
+            return True
+
+    def get_node(self, node_id: str) -> GraphNode | None:
+        return self.nodes.get(node_id)
+
+    def get_edge(self, edge_id: str) -> GraphEdge | None:
+        return self.edges.get(edge_id)
+
+    def find_nodes(
+        self,
+        project_id: str,
+        *,
+        name: str | None = None,
+        node_type: NodeType | None = None,
+    ) -> list[GraphNode]:
+        results = [n for n in self.nodes.values() if n.project_id == project_id]
+        if name:
+            name_l = name.lower()
+            results = [n for n in results if name_l in n.name.lower()]
+        if node_type:
+            results = [n for n in results if n.type == node_type]
+        return results
+
+    def find_node_by_name(self, project_id: str, name: str) -> GraphNode | None:
+        name_l = name.lower().strip()
+        for n in self.nodes.values():
+            if n.project_id == project_id and n.name.lower().strip() == name_l:
+                return n
+        return None
+
+    def get_project_graph(self, project_id: str) -> SystemFlowGraph:
+        project = self.projects.get(project_id, {})
+        nodes = [n for n in self.nodes.values() if n.project_id == project_id]
+        node_ids = {n.id for n in nodes}
+        edges = [e for e in self.edges.values() if e.source in node_ids and e.target in node_ids]
+        return SystemFlowGraph(
+            project_id=project_id,
+            root_node_id=project.get("root_feature_id") or project.get("root_node_id"),
+            version=project.get("graph_version", 1),
+            nodes=nodes,
+            edges=edges,
+        )
+
+    def save_project_graph(self, graph: SystemFlowGraph) -> SystemFlowGraph:
+        with self._lock:
+            # Snapshot version history
+            versions = self.graph_versions.setdefault(graph.project_id, [])
+            current = self.get_project_graph(graph.project_id)
+            if current.nodes or current.edges:
+                versions.append(
+                    {
+                        "version": current.version,
+                        "snapshot": current.model_dump(mode="json"),
+                        "saved_at": utc_now().isoformat(),
+                    }
+                )
+                # Keep last 20 versions
+                self.graph_versions[graph.project_id] = versions[-20:]
+
+            # Remove project nodes/edges then rewrite (user save is authoritative for flow graph)
+            existing_ids = {n.id for n in self.nodes.values() if n.project_id == graph.project_id}
+            # Preserve QA artifact nodes (TestCase, Bug, Risk, etc.) not in the saved flow graph
+            preserve_types = {
+                NodeType.TEST_CASE,
+                NodeType.TEST_SUITE,
+                NodeType.BUG,
+                NodeType.RISK,
+                NodeType.REQUIREMENT,
+                NodeType.QA_DOCUMENT,
+                NodeType.TESTING_TECHNIQUE,
+                NodeType.EXPLORATORY_MISSION,
+                NodeType.EXTERNAL_SOURCE,
+            }
+            for nid in list(existing_ids):
+                node = self.nodes[nid]
+                if node.type in preserve_types and nid not in {n.id for n in graph.nodes}:
+                    continue
+                if nid not in {n.id for n in graph.nodes}:
+                    self.delete_node(nid)
+
+            for node in graph.nodes:
+                node.project_id = graph.project_id
+                if not node.provenance.source_type:
+                    node.provenance = Provenance(source_type=SourceType.USER_INPUT, inferred=False)
+                self.nodes[node.id] = node
+
+            # Replace flow edges among flow nodes
+            flow_ids = {n.id for n in graph.nodes}
+            self.edges = {
+                eid: e
+                for eid, e in self.edges.items()
+                if not (e.source in flow_ids and e.target in flow_ids)
+            }
+            for edge in graph.edges:
+                self.edges[edge.id] = edge
+
+            project = self.projects.setdefault(graph.project_id, {"id": graph.project_id})
+            project["root_feature_id"] = graph.root_node_id
+            project["root_node_id"] = graph.root_node_id
+            project["graph_version"] = graph.version + (
+                1 if current.nodes or current.edges else 0
+            )
+            project["updated_at"] = utc_now().isoformat()
+            graph.version = project["graph_version"]
+            graph.updated_at = utc_now()
+            self.persist()
+            return graph
+
+    def neighbors(
+        self,
+        node_id: str,
+        *,
+        direction: str = "outgoing",
+        relationship: str | None = None,
+    ) -> list[tuple[GraphEdge, GraphNode]]:
+        results: list[tuple[GraphEdge, GraphNode]] = []
+        for edge in self.edges.values():
+            if relationship and str(edge.relationship) != str(relationship):
+                continue
+            if direction in ("outgoing", "both") and edge.source == node_id:
+                target = self.nodes.get(edge.target)
+                if target:
+                    results.append((edge, target))
+            if direction in ("incoming", "both") and edge.target == node_id:
+                source = self.nodes.get(edge.source)
+                if source:
+                    results.append((edge, source))
+        return results
+
+    def discover_paths(
+        self,
+        project_id: str,
+        root_id: str,
+        *,
+        max_depth: int = 8,
+    ) -> list[GraphPath]:
+        """DFS leaf-path discovery from root."""
+        if root_id not in self.nodes:
+            return []
+        paths: list[GraphPath] = []
+
+        def dfs(
+            current: str,
+            names: list[str],
+            ids: list[str],
+            rels: list[str],
+            depth: int,
+            failure: bool,
+            external: bool,
+        ) -> None:
+            children = [
+                (e, n)
+                for e, n in self.neighbors(current, direction="outgoing")
+                if n.project_id == project_id and n.id not in ids
+            ]
+            if not children or depth >= max_depth:
+                paths.append(
+                    GraphPath(
+                        node_ids=ids[:],
+                        node_names=names[:],
+                        relationships=rels[:],
+                        is_failure_path=failure,
+                        includes_external_dependency=external,
+                    )
+                )
+                return
+            for edge, child in children:
+                dfs(
+                    child.id,
+                    names + [child.name],
+                    ids + [child.id],
+                    rels + [str(edge.relationship)],
+                    depth + 1,
+                    failure or child.is_failure_path or child.type == NodeType.FAILURE_PATH,
+                    external
+                    or child.is_external_dependency
+                    or child.type
+                    in (NodeType.EXTERNAL_DEPENDENCY, NodeType.THIRD_PARTY_PROVIDER),
+                )
+
+        root = self.nodes[root_id]
+        dfs(root_id, [root.name], [root_id], [], 0, root.is_failure_path, root.is_external_dependency)
+        return paths
+
+    def impact_subgraph(self, node_id: str, *, max_depth: int = 4) -> dict[str, Any]:
+        if node_id not in self.nodes:
+            return {
+                "changed_node": node_id,
+                "direct": [],
+                "indirect": [],
+                "paths": [],
+            }
+        direct: list[str] = []
+        indirect: list[str] = []
+        reasoning: list[str] = []
+        visited = {node_id}
+        frontier = [(node_id, 0, [self.nodes[node_id].name])]
+        while frontier:
+            current, depth, path = frontier.pop(0)
+            if depth >= max_depth:
+                continue
+            for edge, neighbor in self.neighbors(current, direction="both"):
+                if neighbor.id in visited:
+                    continue
+                visited.add(neighbor.id)
+                new_path = path + [neighbor.name]
+                reasoning.append(" → ".join(new_path) + f" [{edge.relationship}]")
+                if depth == 0:
+                    direct.append(neighbor.name)
+                else:
+                    indirect.append(neighbor.name)
+                frontier.append((neighbor.id, depth + 1, new_path))
+        return {
+            "changed_node": self.nodes[node_id].name,
+            "direct": direct,
+            "indirect": indirect,
+            "paths": reasoning,
+        }
+
+    # --- Project / document / artifact helpers ---
+
+    def create_project(self, name: str, description: str = "", root_feature: str | None = None) -> dict[str, Any]:
+        from app.models.schemas import new_id
+
+        pid = new_id("project")
+        root_id = None
+        if root_feature:
+            root = GraphNode(
+                id=new_id("feature"),
+                type=NodeType.FEATURE,
+                name=root_feature,
+                description=f"Root feature for {name}",
+                project_id=pid,
+                is_critical=True,
+                criticality=__import__("app.models.enums", fromlist=["Priority"]).Priority.HIGH,
+                provenance=Provenance(source_type=SourceType.USER_INPUT, inferred=False, confidence=1.0),
+            )
+            self.nodes[root.id] = root
+            root_id = root.id
+        project = {
+            "id": pid,
+            "name": name,
+            "description": description,
+            "root_feature_id": root_id,
+            "root_node_id": root_id,
+            "graph_version": 1,
+            "created_at": utc_now().isoformat(),
+            "updated_at": utc_now().isoformat(),
+        }
+        self.projects[pid] = project
+        self.persist()
+        return project
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        return list(self.projects.values())
+
+    def get_project(self, project_id: str) -> dict[str, Any] | None:
+        return self.projects.get(project_id)
+
+
+class Neo4jGraphStore:
+    """Optional Neo4j-backed store. Delegates to in-memory if Neo4j unavailable."""
+
+    def __init__(self, fallback: InMemoryGraphStore) -> None:
+        self.fallback = fallback
+        self._driver = None
+        settings = get_settings()
+        if not settings.neo4j_enabled:
+            return
+        try:
+            from neo4j import GraphDatabase
+
+            self._driver = GraphDatabase.driver(
+                settings.neo4j_uri,
+                auth=(settings.neo4j_user, settings.neo4j_password),
+            )
+            self._driver.verify_connectivity()
+            logger.info("neo4j_connected", uri=settings.neo4j_uri)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("neo4j_unavailable_using_memory", error=str(exc))
+            self._driver = None
+
+    def sync_node(self, node: GraphNode) -> None:
+        if not self._driver:
+            return
+        cypher = """
+        MERGE (n:Entity {id: $id})
+        SET n += $props, n:`{label}`
+        """.replace("{label}", node.type.value)
+        props = {
+            "name": node.name,
+            "description": node.description,
+            "project_id": node.project_id,
+            "type": node.type.value,
+            "is_failure_path": node.is_failure_path,
+            "is_external_dependency": node.is_external_dependency,
+            "is_critical": node.is_critical,
+        }
+        with self._driver.session() as session:
+            session.run(cypher, id=node.id, props=props)
+
+    def sync_edge(self, edge: GraphEdge) -> None:
+        if not self._driver:
+            return
+        rel = str(edge.relationship)
+        if not rel.replace("_", "").isalnum():
+            rel = RelationshipType.RELATED_TO.value
+        cypher = f"""
+        MATCH (a:Entity {{id: $source}})
+        MATCH (b:Entity {{id: $target}})
+        MERGE (a)-[r:{rel}]->(b)
+        SET r.id = $id
+        """
+        with self._driver.session() as session:
+            session.run(cypher, source=edge.source, target=edge.target, id=edge.id)
+
+    def close(self) -> None:
+        if self._driver:
+            self._driver.close()
+
+
+_store: InMemoryGraphStore | None = None
+_neo4j: Neo4jGraphStore | None = None
+
+
+def get_graph_store() -> InMemoryGraphStore:
+    global _store
+    if _store is None:
+        _store = InMemoryGraphStore()
+    return _store
+
+
+def get_neo4j_store() -> Neo4jGraphStore:
+    global _neo4j
+    if _neo4j is None:
+        _neo4j = Neo4jGraphStore(get_graph_store())
+    return _neo4j
