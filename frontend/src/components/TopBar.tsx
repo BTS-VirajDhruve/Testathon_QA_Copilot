@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FolderPlus, Loader2, Sparkles } from "lucide-react";
 import type { HealthStatus, Project } from "@/lib/types";
 
@@ -56,8 +56,13 @@ export function TopBar({
           <button className="btn-secondary" onClick={onCreateProject} disabled={busy}>
             <FolderPlus className="h-4 w-4" /> New
           </button>
-          <button className="btn-brass" onClick={onSeed} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          <button
+            className="btn-brass shadow-sm ring-2 ring-brass-500/30"
+            onClick={onSeed}
+            disabled={busy}
+            title="Load Enterprise Authentication Portal demo"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             Load Demo Project
           </button>
         </div>
