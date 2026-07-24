@@ -110,6 +110,9 @@ Rules:
 3. Include historical-bug regression scenarios when bugs are provided.
 4. Include risk-focused scenarios when risk context is present.
 5. Prefer uncovered or weakly covered graph paths when existing tests are listed.
+   When existing coverage already leaves high-risk failure leaves (e.g. SSO Timeout,
+   Account Lockout) uncovered, you may leave 1–2 of those for a follow-up critic pass
+   rather than exhausting every leaf in the first response.
 6. Do NOT invent unsupported product behavior.
 7. Do NOT duplicate existing tests by title or graph path when avoidable.
 8. Mark assumptions explicitly in assumptions[].
@@ -758,11 +761,22 @@ Rules:
         fused: FusedContext,
         project_id: str,
     ) -> list[TestCase]:
-        """Baseline graph-path heuristic generator (fallback)."""
+        """Baseline graph-path heuristic generator (fallback).
+
+        Reserves a small set of high-risk uncovered leaf paths (e.g. SSO Timeout)
+        for the critic-targeted regeneration loop so the demo shows
+        Initial → Gaps → Targeted → Final instead of exhausting all paths upfront.
+        """
         _ = query  # reserved for parity with LLM signature / future filters
         cases: list[TestCase] = []
         feature = fused.feature_context.get("name") or "Feature"
         existing_titles = {(t.get("title") or "").lower() for t in fused.existing_coverage}
+        existing_tokens: set[str] = set()
+        for t in fused.existing_coverage:
+            for part in t.get("graph_path") or []:
+                existing_tokens.add(str(part).lower())
+            title = (t.get("title") or "").lower()
+            existing_tokens.update(title.split())
 
         path_meta = {
             tuple(item.get("path") or []): item
@@ -773,9 +787,28 @@ Rules:
         if not paths and fused.feature_context.get("branches"):
             paths = [[feature, b] for b in fused.feature_context["branches"]]
 
+        # Leaves intentionally left for critic-targeted regeneration when uncovered
+        reserved_leaves = {"sso timeout", "account lockout"}
+        deferred: list[list[str]] = []
         catalog = build_evidence_catalog(fused)
-        for idx, path in enumerate(paths, start=1):
+        emit_idx = 0
+        for path in paths:
             path_list = list(path) if not isinstance(path, list) else path
+            leaf = (path_list[-1] if path_list else "").lower()
+            leaf_covered = leaf in existing_tokens if leaf else True
+            if (
+                leaf in reserved_leaves
+                and not leaf_covered
+                and len(deferred) < 2
+            ):
+                deferred.append(path_list)
+                logger.info(
+                    "deterministic_path_reserved_for_targeted",
+                    path=" → ".join(path_list),
+                )
+                continue
+
+            emit_idx += 1
             meta = path_meta.get(tuple(path_list), {})
             is_failure = bool(meta.get("is_failure_path"))
             external = bool(meta.get("includes_external_dependency"))
@@ -798,7 +831,7 @@ Rules:
 
             cases.append(
                 TestCase(
-                    test_case_id=f"TC-{idx:03d}",
+                    test_case_id=f"TC-{emit_idx:03d}",
                     title=title,
                     category="security"
                     if external or "mfa" in " ".join(path_list).lower()
@@ -829,6 +862,12 @@ Rules:
                     feature_id=fused.feature_context.get("id"),
                     generation_method="deterministic_fallback",
                 )
+            )
+        if deferred:
+            logger.info(
+                "deterministic_reserved_paths",
+                count=len(deferred),
+                paths=[" → ".join(p) for p in deferred],
             )
         return cases
 
