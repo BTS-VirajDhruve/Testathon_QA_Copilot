@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.core.logging import get_logger
@@ -52,12 +53,264 @@ def _priority_for_path(path: list[str], is_failure: bool, external: bool) -> Pri
 
 
 class TestCaseAgent:
+    """Generate structured test cases from fused hybrid RAG context.
+
+    Primary path: LLM structured generation when OpenAI is available.
+    Fallback: deterministic graph-path heuristics (baseline behavior).
+    """
+
+    MAX_LLM_ATTEMPTS = 2
+
+    SYSTEM_PROMPT = """You are a senior QA automation architect.
+Generate comprehensive, evidence-backed test cases from the provided fused QA context.
+
+Return JSON only with this shape:
+{
+  "test_cases": [
+    {
+      "title": "string",
+      "category": "functional|security|negative|regression|exploratory",
+      "priority": "critical|high|medium|low",
+      "risk": "critical|high|medium|low",
+      "preconditions": ["string"],
+      "test_data": {},
+      "steps": ["string"],
+      "expected_result": "string",
+      "testing_technique": "string",
+      "graph_path": ["node label", "..."],
+      "graph_reasoning": "string",
+      "source_references": ["string"],
+      "confidence": "high|medium|low",
+      "assumptions": ["string"]
+    }
+  ]
+}
+
+Rules:
+1. Cover positive, negative, alternate-flow, and failure-path scenarios supported by the context.
+2. Include boundary scenarios only when evidence supports them.
+3. Include historical-bug regression scenarios when bugs are provided.
+4. Include risk-focused scenarios when risk context is present.
+5. Prefer uncovered or weakly covered graph paths when existing tests are listed.
+6. Do NOT invent unsupported product behavior.
+7. Do NOT duplicate existing tests by title or graph path when avoidable.
+8. Mark assumptions explicitly in assumptions[].
+9. Preserve graph_path traceability using labels from DISCOVERED GRAPH PATHS whenever possible.
+10. Use only information present in the context sections. If a section is empty/unavailable, do not fabricate it.
+"""
+
     def generate(self, query: str, fused: FusedContext, project_id: str) -> list[TestCase]:
+        openai = get_openai_service()
+        cases: list[TestCase] = []
+        method = "deterministic_fallback"
+
+        if openai.available:
+            llm_cases = self._generate_with_llm(query, fused, project_id, openai)
+            if llm_cases:
+                cases = llm_cases
+                method = "llm"
+                logger.info("testcase_llm_primary_success", count=len(cases))
+            else:
+                logger.warning("testcase_llm_primary_failed_using_fallback")
+                cases = self._generate_deterministic(query, fused, project_id)
+        else:
+            logger.info("testcase_openai_unavailable_using_fallback")
+            cases = self._generate_deterministic(query, fused, project_id)
+
+        for case in cases:
+            if not case.generation_method:
+                case.generation_method = method
+            case.project_id = case.project_id or project_id
+            if not case.feature_id:
+                case.feature_id = fused.feature_context.get("id")
+
+        # Persist lightly for coverage matching (baseline behavior)
+        store = get_graph_store()
+        for case in cases:
+            store.test_cases[case.test_case_id] = case.model_dump(mode="json")
+        store.persist()
+        return cases
+
+    def build_llm_context(self, query: str, fused: FusedContext) -> dict[str, Any]:
+        """Structured context passed to the LLM — preserves fused retrieval evidence."""
+        path_entries: list[dict[str, Any]] = []
+        for item in fused.graph_context:
+            if item.get("path"):
+                path_entries.append(
+                    {
+                        "node_labels": item.get("path"),
+                        "edge_relationships": item.get("relationships") or [],
+                        "path_sequence": item.get("path"),
+                        "is_failure_path": bool(item.get("is_failure_path")),
+                        "includes_external_dependency": bool(
+                            item.get("includes_external_dependency")
+                        ),
+                    }
+                )
+        if not path_entries and fused.flow_paths:
+            for path in fused.flow_paths:
+                path_entries.append(
+                    {
+                        "node_labels": path,
+                        "edge_relationships": [],
+                        "path_sequence": path,
+                        "is_failure_path": False,
+                        "includes_external_dependency": False,
+                    }
+                )
+
+        graph_entities = [
+            item
+            for item in fused.graph_context
+            if item.get("entity") and not item.get("path")
+        ]
+
+        requirements = []
+        for hit in fused.semantic_context:
+            requirements.append(
+                {
+                    "content": hit.get("content"),
+                    "score": hit.get("score"),
+                    "source_reference": hit.get("source_reference") or hit.get("id"),
+                    "metadata": hit.get("metadata") or {},
+                }
+            )
+
+        return {
+            "user_request": query,
+            "target_feature": fused.feature_context or "unavailable",
+            "system_flow_graph": {
+                "branches": fused.feature_context.get("branches") or [],
+                "entities": graph_entities or "unavailable",
+                "note": "User-provided system flow graph is the structural source of truth.",
+            },
+            "discovered_graph_paths": path_entries or "unavailable",
+            "requirements": requirements or "unavailable",
+            "existing_tests": fused.existing_coverage or "unavailable",
+            "historical_bugs": fused.historical_risks or "unavailable",
+            "risk_context": {
+                "historical_risks": fused.historical_risks or [],
+                "external_context": fused.external_context or [],
+            }
+            if (fused.historical_risks or fused.external_context)
+            else "unavailable",
+            "retrieval_sources": {
+                "user_flow_graph": True,
+                "vector_hits": len(fused.semantic_context),
+                "existing_tests": len(fused.existing_coverage),
+                "historical_bugs": len(fused.historical_risks),
+                "external_notes": fused.external_context or [],
+            },
+        }
+
+    def _generate_with_llm(
+        self,
+        query: str,
+        fused: FusedContext,
+        project_id: str,
+        openai: Any,
+    ) -> list[TestCase]:
+        context = self.build_llm_context(query, fused)
+        user_prompt = (
+            "Generate structured QA test cases from this fused context.\n\n"
+            f"{json.dumps(context, indent=2, default=str)}"
+        )
+
+        last_error: str | None = None
+        for attempt in range(1, self.MAX_LLM_ATTEMPTS + 1):
+            try:
+                repair_hint = ""
+                if attempt > 1:
+                    repair_hint = (
+                        "\n\nPrevious output was invalid or empty. "
+                        "Return a valid JSON object with a non-empty test_cases array "
+                        "matching the required schema exactly."
+                    )
+                data = openai.chat_json(
+                    self.SYSTEM_PROMPT,
+                    user_prompt + repair_hint,
+                    temperature=0.2,
+                    strict=True,
+                )
+                cases = self._parse_and_validate_cases(data, project_id, fused)
+                if cases:
+                    return cases
+                last_error = "empty_or_unusable_test_cases"
+                logger.warning(
+                    "testcase_llm_attempt_unusable",
+                    attempt=attempt,
+                    raw_keys=list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                logger.warning("testcase_llm_attempt_failed", attempt=attempt, error=last_error)
+
+        logger.warning("testcase_llm_exhausted_attempts", last_error=last_error)
+        return []
+
+    def _parse_and_validate_cases(
+        self,
+        data: dict[str, Any],
+        project_id: str,
+        fused: FusedContext,
+    ) -> list[TestCase]:
+        if not isinstance(data, dict):
+            return []
+        raw_cases = data.get("test_cases")
+        if not isinstance(raw_cases, list) or not raw_cases:
+            return []
+
+        feature_id = fused.feature_context.get("id")
+        feature_name = fused.feature_context.get("name") or "Feature"
+        valid: list[TestCase] = []
+        for idx, raw in enumerate(raw_cases, start=1):
+            if not isinstance(raw, dict):
+                continue
+            try:
+                payload = dict(raw)
+                payload.setdefault("test_case_id", f"TC-{idx:03d}")
+                payload.setdefault("project_id", project_id)
+                payload.setdefault("feature_id", feature_id)
+                payload.setdefault("generation_method", "llm")
+                # Normalize enums that may arrive as unexpected casing
+                if "priority" in payload and isinstance(payload["priority"], str):
+                    payload["priority"] = payload["priority"].lower()
+                if "risk" in payload and isinstance(payload["risk"], str):
+                    payload["risk"] = payload["risk"].lower()
+                if "confidence" in payload and isinstance(payload["confidence"], str):
+                    payload["confidence"] = payload["confidence"].lower()
+                if not payload.get("graph_path"):
+                    payload["graph_path"] = [feature_name]
+                if not payload.get("steps"):
+                    continue
+                if not payload.get("title"):
+                    continue
+                if not payload.get("expected_result"):
+                    payload["expected_result"] = "Behavior matches evidence-backed expectations."
+                if not payload.get("source_references"):
+                    payload["source_references"] = ["User-provided system flow graph", "LLM structured generation"]
+                case = TestCase.model_validate(payload)
+                # Re-number for stable baseline-compatible IDs
+                case.test_case_id = f"TC-{len(valid) + 1:03d}"
+                case.generation_method = "llm"
+                valid.append(case)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("testcase_llm_item_invalid", index=idx, error=str(exc))
+                continue
+        return valid
+
+    def _generate_deterministic(
+        self,
+        query: str,
+        fused: FusedContext,
+        project_id: str,
+    ) -> list[TestCase]:
+        """Baseline graph-path heuristic generator (fallback)."""
+        _ = query  # reserved for parity with LLM signature / future filters
         cases: list[TestCase] = []
         feature = fused.feature_context.get("name") or "Feature"
-        existing_titles = { (t.get("title") or "").lower() for t in fused.existing_coverage }
+        existing_titles = {(t.get("title") or "").lower() for t in fused.existing_coverage}
 
-        # Prefer graph-path based generation
         path_meta = {
             tuple(item.get("path") or []): item
             for item in fused.graph_context
@@ -72,10 +325,8 @@ class TestCaseAgent:
             meta = path_meta.get(tuple(path_list), {})
             is_failure = bool(meta.get("is_failure_path"))
             external = bool(meta.get("includes_external_dependency"))
-            leaf = path_list[-1] if path_list else feature
             title = self._title_for(path_list, is_failure)
             if title.lower() in existing_titles:
-                # Still emit but mark as regression-relevant coverage check
                 title = f"Verify existing coverage: {title}"
 
             risk = RiskLevel.HIGH if is_failure or external else RiskLevel.MEDIUM
@@ -86,7 +337,9 @@ class TestCaseAgent:
             ][:3]
             sources = ["User-provided system flow graph"]
             if fused.semantic_context:
-                sources.append(fused.semantic_context[0].get("source_reference") or "Vector RAG requirements")
+                sources.append(
+                    fused.semantic_context[0].get("source_reference") or "Vector RAG requirements"
+                )
             if related_bugs:
                 sources.extend([str(b) for b in related_bugs])
 
@@ -94,7 +347,9 @@ class TestCaseAgent:
                 TestCase(
                     test_case_id=f"TC-{idx:03d}",
                     title=title,
-                    category="security" if external or "mfa" in " ".join(path_list).lower() else "functional",
+                    category="security"
+                    if external or "mfa" in " ".join(path_list).lower()
+                    else "functional",
                     priority=_priority_for_path(path_list, is_failure, external),
                     risk=risk,
                     preconditions=[
@@ -113,60 +368,21 @@ class TestCaseAgent:
                             if external
                             else "Path represents a user-reachable authentication journey."
                         )
-                        + (
-                            " Failure/negative behavior is in scope."
-                            if is_failure
-                            else ""
-                        )
+                        + (" Failure/negative behavior is in scope." if is_failure else "")
                     ),
                     source_references=sources,
-                    confidence=ConfidenceLevel.HIGH if not meta.get("inferred") else ConfidenceLevel.MEDIUM,
+                    confidence=ConfidenceLevel.HIGH
+                    if not meta.get("inferred")
+                    else ConfidenceLevel.MEDIUM,
                     assumptions=[
                         "User-provided flow graph accurately reflects production behavior.",
                         "Inferred nodes (if any) are marked and not treated as confirmed architecture.",
                     ],
                     project_id=project_id,
                     feature_id=fused.feature_context.get("id"),
+                    generation_method="deterministic_fallback",
                 )
             )
-
-        # Supplement with LLM if available for cross-method security cases
-        openai = get_openai_service()
-        if openai.available and cases:
-            try:
-                data = openai.chat_json(
-                    "You are a senior QA engineer. Given fused QA context, propose up to 3 additional "
-                    "cross-cutting security/session test cases as JSON {test_cases:[{title,steps,expected_result,graph_path,graph_reasoning}]}.",
-                    f"Query: {query}\nFeature: {feature}\nBranches: {fused.feature_context.get('branches')}\n"
-                    f"Historical risks: {fused.historical_risks[:5]}",
-                )
-                for extra in data.get("test_cases", [])[:3]:
-                    cases.append(
-                        TestCase(
-                            test_case_id=f"TC-{len(cases)+1:03d}",
-                            title=extra.get("title") or "Cross-cutting auth security check",
-                            category="security",
-                            priority=Priority.HIGH,
-                            risk=RiskLevel.HIGH,
-                            steps=extra.get("steps") or ["Exercise cross-method auth edge case."],
-                            expected_result=extra.get("expected_result") or "Secure handling without session leakage.",
-                            testing_technique="Security testing",
-                            graph_path=extra.get("graph_path") or [feature],
-                            graph_reasoning=extra.get("graph_reasoning") or "LLM-assisted cross-path security case.",
-                            source_references=["LLM reasoning", "User-provided system flow graph"],
-                            confidence=ConfidenceLevel.MEDIUM,
-                            assumptions=["Additional case may be partially inferred."],
-                            project_id=project_id,
-                        )
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("testcase_llm_enrichment_failed", error=str(exc))
-
-        # Persist lightly for coverage matching
-        store = get_graph_store()
-        for case in cases:
-            store.test_cases[case.test_case_id] = case.model_dump(mode="json")
-        store.persist()
         return cases
 
     def _title_for(self, path: list[str], is_failure: bool) -> str:
@@ -208,7 +424,10 @@ class TestCaseAgent:
                 f"System handles failure on path {' → '.join(path)} without crashing, "
                 "with clear user feedback and no insecure session creation."
             )
-        return f"User successfully completes {' → '.join(path)} and reaches the intended authenticated/application state."
+        return (
+            f"User successfully completes {' → '.join(path)} and reaches the intended "
+            "authenticated/application state."
+        )
 
 
 class ExploratoryAgent:

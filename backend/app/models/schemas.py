@@ -157,6 +157,8 @@ class TestCase(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     project_id: str | None = None
     feature_id: str | None = None
+    # Additive metadata — optional for API compatibility with older clients
+    generation_method: str | None = None  # "llm" | "deterministic_fallback"
 
 
 class ExploratoryMission(BaseModel):

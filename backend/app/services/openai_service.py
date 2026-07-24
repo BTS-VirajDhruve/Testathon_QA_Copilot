@@ -40,8 +40,15 @@ class OpenAIService:
         user: str,
         *,
         temperature: float = 0.2,
+        strict: bool = False,
     ) -> dict[str, Any]:
-        raw = self.chat(system=system, user=user, temperature=temperature, json_mode=True)
+        raw = self.chat(
+            system=system,
+            user=user,
+            temperature=temperature,
+            json_mode=True,
+            strict=strict,
+        )
         return self._parse_json(raw)
 
     def chat(
@@ -51,8 +58,11 @@ class OpenAIService:
         *,
         temperature: float = 0.2,
         json_mode: bool = False,
+        strict: bool = False,
     ) -> str:
         if self._client is None:
+            if strict:
+                raise RuntimeError("OpenAI client unavailable")
             return self._demo_chat(system, user, json_mode=json_mode)
 
         kwargs: dict[str, Any] = {
@@ -71,9 +81,9 @@ class OpenAIService:
             return response.choices[0].message.content or ""
         except Exception as exc:  # noqa: BLE001
             logger.error("openai_chat_failed", error=str(exc))
-            if self.settings.enable_demo_fallback:
-                return self._demo_chat(system, user, json_mode=json_mode)
-            raise
+            if strict or not self.settings.enable_demo_fallback:
+                raise
+            return self._demo_chat(system, user, json_mode=json_mode)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

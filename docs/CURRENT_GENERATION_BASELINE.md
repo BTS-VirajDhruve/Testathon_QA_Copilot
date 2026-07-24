@@ -1,10 +1,10 @@
 # Current Test Case Generation Baseline
 
-**Status:** Regression baseline before LLM-first generation changes  
+**Status:** Locked regression baseline (deterministic fallback contract)  
 **Date:** 2026-07-24  
-**Scope:** Document and lock current behavior only — no architecture migration
+**Update:** Phase 2 made LLM structured generation the **primary** path when OpenAI is available. This document still defines the **deterministic fallback** contract that must remain intact. See `docs/LLM_FIRST_GENERATION.md`.
 
-This document freezes the **current** test-case generation path so future LLM-first work can be compared against a known-good baseline.
+**Original scope:** Document and lock heuristic generation behavior before LLM-first changes.
 
 ---
 

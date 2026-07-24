@@ -161,6 +161,7 @@ def test_testcase_agent_deterministic_path_baseline():
     assert cases[2].title.startswith("Graceful handling:")
     assert cases[2].category == "security"
     assert cases[2].risk.value == "high"
+    assert all(c.generation_method == "deterministic_fallback" for c in cases)
 
     # Failure path steps include failure inject/observe wording
     assert any("failure" in s.lower() for s in cases[1].steps)
