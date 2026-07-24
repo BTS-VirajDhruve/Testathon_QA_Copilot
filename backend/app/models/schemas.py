@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.models.enums import (
     ConfidenceLevel,
+    GapType,
     NodeType,
     Priority,
     RelationshipType,
@@ -172,6 +173,9 @@ class TestCase(BaseModel):
     reasoning: str | None = None
     # Structured evidence (preferred). source_references remains the legacy string list.
     evidence: list[EvidenceReference] = Field(default_factory=list)
+    # Phase 4: which coverage gap this critic-targeted test closes (when applicable)
+    closes_gap_id: str | None = None
+    closes_gap_title: str | None = None
 
 
 class ExploratoryMission(BaseModel):
@@ -239,6 +243,36 @@ class CoverageGapResult(BaseModel):
     calculation_notes: list[str] = Field(default_factory=list)
 
 
+class CoverageGap(BaseModel):
+    """Structured coverage gap for prioritization and targeted regeneration."""
+
+    gap_id: str = Field(default_factory=lambda: new_id("GAP"))
+    gap_type: GapType | str = GapType.BRANCH
+    title: str
+    description: str = ""
+    priority: Priority = Priority.MEDIUM
+    risk: RiskLevel = RiskLevel.MEDIUM
+    graph_path: list[str] = Field(default_factory=list)
+    source_references: list[str] = Field(default_factory=list)
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    reason: str = ""
+    selected_for_regeneration: bool = False
+
+
+class CoverageSnapshot(BaseModel):
+    """Deterministic before/after coverage view for the regeneration loop."""
+
+    total_paths: int = 0
+    covered_paths: int = 0
+    coverage_percentage: float = 0.0
+    overall_coverage: float = 0.0
+    branch_coverage: float = 0.0
+    gaps: list[CoverageGap] = Field(default_factory=list)
+    critical_gaps: list[str] = Field(default_factory=list)
+    uncovered_branches: list[str] = Field(default_factory=list)
+    calculation_notes: list[str] = Field(default_factory=list)
+
+
 class RetrievalPlan(BaseModel):
     use_user_flow_graph: bool = True
     use_vector_rag: bool = True
@@ -272,6 +306,10 @@ class QACopilotRequest(BaseModel):
     root_feature: str | None = None
     changed_node: str | None = None
     include_critic: bool = True
+    # Phase 4: bounded critic → gap → targeted regeneration (default 1, hard max 2)
+    enable_targeted_regeneration: bool = True
+    max_regeneration_rounds: int = Field(default=1, ge=0, le=2)
+    max_gaps_per_round: int = Field(default=4, ge=0, le=10)
 
 
 class QACopilotResponse(BaseModel):
@@ -299,6 +337,14 @@ class QACopilotResponse(BaseModel):
     critic_notes: list[str] = Field(default_factory=list)
     execution_trace: list[AgentTraceStep] = Field(default_factory=list)
     narrative: str = ""
+    # Phase 4 additive fields — optional for older clients
+    initial_test_cases: list[TestCase] = Field(default_factory=list)
+    selected_coverage_gaps: list[CoverageGap] = Field(default_factory=list)
+    targeted_test_cases: list[TestCase] = Field(default_factory=list)
+    coverage_before: CoverageSnapshot | None = None
+    coverage_after: CoverageSnapshot | None = None
+    regeneration_rounds: int = 0
+    unresolved_gaps: list[CoverageGap] = Field(default_factory=list)
 
 
 class GraphPath(BaseModel):

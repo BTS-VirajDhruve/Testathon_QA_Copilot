@@ -75,6 +75,34 @@ export type TestCase = {
   generation_method?: string | null;
   reasoning?: string | null;
   evidence?: EvidenceReference[];
+  closes_gap_id?: string | null;
+  closes_gap_title?: string | null;
+};
+
+export type CoverageGap = {
+  gap_id: string;
+  gap_type: string;
+  title: string;
+  description?: string;
+  priority: string;
+  risk: string;
+  graph_path: string[];
+  source_references?: string[];
+  evidence?: EvidenceReference[];
+  reason?: string;
+  selected_for_regeneration?: boolean;
+};
+
+export type CoverageSnapshot = {
+  total_paths: number;
+  covered_paths: number;
+  coverage_percentage: number;
+  overall_coverage: number;
+  branch_coverage: number;
+  gaps: CoverageGap[];
+  critical_gaps: string[];
+  uncovered_branches: string[];
+  calculation_notes: string[];
 };
 
 export type QACopilotResponse = {
@@ -134,6 +162,13 @@ export type QACopilotResponse = {
   critic_notes: string[];
   execution_trace: AgentTraceStep[];
   narrative: string;
+  initial_test_cases?: TestCase[];
+  selected_coverage_gaps?: CoverageGap[];
+  targeted_test_cases?: TestCase[];
+  coverage_before?: CoverageSnapshot | null;
+  coverage_after?: CoverageSnapshot | null;
+  regeneration_rounds?: number;
+  unresolved_gaps?: CoverageGap[];
 };
 
 export type DashboardStats = {

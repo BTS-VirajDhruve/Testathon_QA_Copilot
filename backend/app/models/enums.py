@@ -108,5 +108,18 @@ class ConfidenceLevel(str, Enum):
     LOW = "low"
 
 
+class GapType(str, Enum):
+    """Structured coverage-gap kinds used by prioritization / targeted regeneration."""
+
+    GRAPH_PATH = "graph_path"
+    BRANCH = "branch"
+    NEGATIVE = "negative"
+    FAILURE = "failure"
+    BUG = "bug"
+    REQUIREMENT = "requirement"
+    RISK = "risk"
+    ALTERNATE = "alternate"
+
+
 # Default relationship for parent→child in user flow trees
 DEFAULT_FLOW_RELATIONSHIP = RelationshipType.HAS_CHILD

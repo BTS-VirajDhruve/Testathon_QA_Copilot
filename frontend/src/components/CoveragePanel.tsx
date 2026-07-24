@@ -20,12 +20,48 @@ export function CoveragePanel({
       .catch(() => setCoverage(null));
   }, [projectId, result]);
 
-  const data = result?.coverage || coverage;
+  const data = result?.coverage_after
+    ? {
+        overall_coverage: result.coverage_after.overall_coverage,
+        branch_coverage: result.coverage_after.branch_coverage,
+        uncovered_branches: result.coverage_after.uncovered_branches,
+        critical_gaps: result.coverage_after.critical_gaps,
+        calculation_notes: result.coverage_after.calculation_notes,
+      }
+    : result?.coverage || coverage;
 
   return (
     <section className="panel p-6">
       <div className="label">Coverage Analysis</div>
       <h2 className="mt-2 font-display text-2xl">Graph-based coverage gaps</h2>
+
+      {result?.coverage_before || result?.coverage_after ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
+            <div className="text-xs uppercase tracking-[0.14em] text-ink-600/60">Before regeneration</div>
+            <div className="mt-1 font-display text-3xl">
+              {result.coverage_before?.coverage_percentage ?? "—"}%
+            </div>
+            <div className="mt-1 text-sm text-ink-700/70">
+              {result.coverage_before
+                ? `${result.coverage_before.covered_paths}/${result.coverage_before.total_paths} paths`
+                : "—"}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
+            <div className="text-xs uppercase tracking-[0.14em] text-ink-600/60">After regeneration</div>
+            <div className="mt-1 font-display text-3xl">
+              {result.coverage_after?.coverage_percentage ?? "—"}%
+            </div>
+            <div className="mt-1 text-sm text-ink-700/70">
+              {result.coverage_after
+                ? `${result.coverage_after.covered_paths}/${result.coverage_after.total_paths} paths`
+                : "—"}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {!data ? (
         <p className="mt-4 text-sm text-ink-600/70">No coverage data yet.</p>
       ) : (
