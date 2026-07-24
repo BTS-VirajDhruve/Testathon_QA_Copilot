@@ -135,9 +135,14 @@ export function TestCaseEvidenceCard({ tc }: { tc: TestCase }) {
         <div className="mt-3 text-xs text-ink-600/70">
           Sources: {tc.source_references.join(" · ")}
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-3 text-xs text-ink-600/60">Supporting evidence unavailable for this test.</div>
+      )}
 
-      <div className="mt-3 text-xs text-ink-600/60">Confidence: {tc.confidence}</div>
+      <div className="mt-3 flex flex-wrap gap-3 text-xs text-ink-600/60">
+        <span>Confidence: {tc.confidence}</span>
+        {method ? <span>Generation method: {method}</span> : null}
+      </div>
     </article>
   );
 }

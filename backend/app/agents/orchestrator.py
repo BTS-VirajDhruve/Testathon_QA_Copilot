@@ -164,7 +164,18 @@ class QAOrchestrator:
 
         if intent in (QAIntent.TEST_GENERATION, QAIntent.GENERAL_QA, QAIntent.REQUIREMENTS_ANALYSIS):
             test_cases = self.test_agent.generate(request.query, fused, request.project_id)
-            self._trace(trace, "Test Cases Generated", f"{len(test_cases)} cases from graph paths")
+            methods = {tc.generation_method for tc in test_cases if tc.generation_method}
+            self._trace(
+                trace,
+                "Initial Test Generation",
+                f"{len(test_cases)} cases · methods={sorted(m for m in methods if m)}",
+            )
+            evidence_count = sum(len(tc.evidence or []) for tc in test_cases)
+            self._trace(
+                trace,
+                "Evidence Validation",
+                f"{evidence_count} evidence refs across {len(test_cases)} tests (fabricated IDs sanitized)",
+            )
             exploratory = self.exploratory_agent.generate(fused)
             self._trace(trace, "Exploratory Missions Generated", str(len(exploratory)))
             regressions = self.regression_agent.recommend(fused, impact, changed)
@@ -190,6 +201,14 @@ class QAOrchestrator:
 
         if intent == QAIntent.COVERAGE_GAP and coverage:
             self._trace(trace, "Coverage Gaps Identified", ", ".join(coverage.uncovered_branches[:6]))
+            # If the user also asked to generate tests, still produce an initial suite
+            if not test_cases and ("generate" in request.query.lower() and "test" in request.query.lower()):
+                test_cases = self.test_agent.generate(request.query, fused, request.project_id)
+                self._trace(
+                    trace,
+                    "Initial Test Generation",
+                    f"{len(test_cases)} cases (coverage_gap intent with generate request)",
+                )
 
         # Snapshot of initial generation (before critic-targeted regeneration)
         initial_test_cases = [tc.model_copy(deep=True) for tc in test_cases]
@@ -218,6 +237,7 @@ class QAOrchestrator:
         targeted_tests: list[TestCase] = []
         unresolved: list[CoverageGap] = []
         regeneration_rounds = 0
+        duplicates_removed = 0
 
         run_regen = (
             bool(request.enable_targeted_regeneration)
@@ -283,7 +303,6 @@ class QAOrchestrator:
                     round_new.extend(generated)
 
                 unique_new = deduplicate_tests(round_new, against=test_cases)
-                # Also dedupe against project existing coverage catalog (title/path/steps)
                 from app.agents.dedup import is_duplicate
 
                 unique_new = [
@@ -291,6 +310,14 @@ class QAOrchestrator:
                     for tc in unique_new
                     if not is_duplicate(tc, fused.existing_coverage)
                 ]
+                round_dupes = max(0, len(round_new) - len(unique_new))
+                duplicates_removed += round_dupes
+                self._trace(
+                    trace,
+                    "Deduplication",
+                    f"kept {len(unique_new)} / {len(round_new)} targeted tests "
+                    f"(removed {round_dupes} duplicates)",
+                )
 
                 if not unique_new:
                     self._trace(
@@ -388,6 +415,36 @@ class QAOrchestrator:
             else (coverage.critical_gaps if coverage else [])
         )
 
+        from app.services.openai_service import get_openai_service
+        from app.rag.vector_store import get_vector_store
+        from app.core.config import get_settings
+
+        openai = get_openai_service()
+        methods = {tc.generation_method for tc in test_cases if tc.generation_method}
+        if methods == {"llm"} or (methods <= {"llm", "critic"} and "llm" in methods and "deterministic_fallback" not in methods):
+            generation_backend = "openai" if openai.available else "deterministic_fallback"
+        elif "deterministic_fallback" in methods and "llm" not in methods:
+            generation_backend = "deterministic_fallback"
+        elif methods:
+            generation_backend = "mixed"
+        else:
+            generation_backend = (
+                "openai" if openai.available else "deterministic_fallback"
+            )
+
+        settings = get_settings()
+        runtime_diagnostics = {
+            **openai.diagnostics(),
+            **get_vector_store().diagnostics(),
+            "graph_store_mode": "neo4j+json" if settings.neo4j_enabled else "json",
+            "generation_backend": generation_backend,
+            "duplicates_removed": duplicates_removed,
+        }
+        if generation_backend == "deterministic_fallback":
+            assumptions.append(
+                "OpenAI was unavailable or unused for this run; deterministic generation produced the tests."
+            )
+
         narrative = self._narrative(
             root_name=root_name,
             risk=risk,
@@ -433,6 +490,8 @@ class QAOrchestrator:
                 "initial_tests": len(initial_test_cases),
                 "targeted_tests": len(targeted_tests),
                 "regeneration_rounds": regeneration_rounds,
+                "graph_context_items": len(fused.graph_context),
+                "vector_hits": len(fused.semantic_context),
             },
             evidence=evidence,
             confidence=confidence,
@@ -447,6 +506,9 @@ class QAOrchestrator:
             coverage_after=coverage_after,
             regeneration_rounds=regeneration_rounds,
             unresolved_gaps=unresolved,
+            duplicates_removed=duplicates_removed,
+            generation_backend=generation_backend,
+            runtime_diagnostics=runtime_diagnostics,
         )
 
     def _extract_changed_node(self, query: str) -> str | None:

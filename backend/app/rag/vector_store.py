@@ -47,6 +47,17 @@ class VectorStore:
             self._chroma = None
             self._collection = None
 
+    @property
+    def backend_mode(self) -> str:
+        return "chroma" if self._collection is not None else "json_fallback"
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "vector_store_mode": self.backend_mode,
+            "chroma_dir": self.settings.chroma_dir,
+            "fallback_index": str(self._fallback_path),
+        }
+
     def _load_fallback(self) -> None:
         if self._fallback_path.exists():
             try:

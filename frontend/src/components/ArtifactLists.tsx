@@ -46,11 +46,19 @@ export function ArtifactLists({
           assumptions: [],
         }));
     return (
-      <Panel title="Test Cases" subtitle="Explainable path-linked tests with evidence">
+      <Panel
+        title="Test Cases"
+        subtitle={
+          result?.test_cases?.length
+            ? "Latest Copilot-generated tests with evidence"
+            : "Seeded / stored project tests"
+        }
+      >
         <div className="grid gap-3 lg:grid-cols-2">
           {items.map((tc) => (
             <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} />
           ))}
+          {items.length === 0 && <Empty text="No tests yet. Load the demo or run the Copilot." />}
         </div>
       </Panel>
     );
@@ -100,6 +108,7 @@ export function ArtifactLists({
               </div>
             </article>
           ))}
+          {items.length === 0 && <Empty text="No bugs yet. Load the demo or run a bug-report query." />}
         </div>
       </Panel>
     );

@@ -52,6 +52,8 @@ class RetrievalPlanner:
             QAIntent.DEFECT_PATTERN,
             QAIntent.BUG_REPORT,
             QAIntent.EXPLORATORY,
+            QAIntent.COVERAGE_GAP,
+            QAIntent.GENERAL_QA,
         }
         use_external = "latest" in q or "cve" in q or "owasp" in q or "external research" in q
 
@@ -88,11 +90,24 @@ class IntentClassifier:
         (QAIntent.BUG_REPORT, ("bug report", "defect report", "file a bug")),
         (QAIntent.REGRESSION, ("regression", "recommend tests after", "what to retest")),
         (QAIntent.IMPACT_ANALYSIS, ("impact", "impacted", "what components", "changed")),
+        # Prefer generation when the user explicitly asks to generate tests,
+        # even if the same query also mentions coverage gaps (hackathon demo journey).
+        (
+            QAIntent.TEST_GENERATION,
+            (
+                "generate comprehensive test",
+                "generate tests",
+                "generate test",
+                "test case",
+                "qa coverage",
+                "test suite",
+                "targeted tests",
+            ),
+        ),
         (QAIntent.COVERAGE_GAP, ("coverage gap", "uncovered", "missing tests", "coverage analysis")),
         (QAIntent.DEFECT_PATTERN, ("historical bug", "defect pattern", "recurring")),
         (QAIntent.DOCUMENTATION, ("qa documentation", "write docs", "test plan doc")),
         (QAIntent.REQUIREMENTS_ANALYSIS, ("analyze requirements", "requirement analysis")),
-        (QAIntent.TEST_GENERATION, ("test case", "generate test", "qa coverage", "test suite")),
     ]
 
     def classify(self, query: str) -> QAIntent:
@@ -100,7 +115,9 @@ class IntentClassifier:
         if openai.available:
             data = openai.chat_json(
                 "Classify the QA intent. Return JSON {intent, confidence}. "
-                f"Allowed intents: {[i.value for i in QAIntent]}",
+                f"Allowed intents: {[i.value for i in QAIntent]}. "
+                "If the user asks to generate tests and also identify coverage gaps, "
+                "prefer test_generation.",
                 query,
             )
             try:
@@ -108,6 +125,11 @@ class IntentClassifier:
             except ValueError:
                 pass
         lower = query.lower()
+        # Compound demo/product query: generate tests + coverage gaps → generation path
+        asks_generate = "generate" in lower and "test" in lower
+        asks_gaps = any(k in lower for k in ("coverage gap", "uncovered", "targeted test"))
+        if asks_generate and asks_gaps:
+            return QAIntent.TEST_GENERATION
         for intent, keys in self.KEYWORDS:
             if any(k in lower for k in keys):
                 return intent

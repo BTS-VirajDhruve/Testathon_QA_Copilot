@@ -6,7 +6,7 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store, get_neo4j_store
-from app.models.enums import NodeType, RelationshipType, SourceType
+from app.models.enums import NodeType, Priority, RelationshipType, SourceType
 from app.models.schemas import (
     GraphEdge,
     GraphNode,
@@ -127,6 +127,7 @@ class FlowGraphIngester:
                 branch = NestedBranch(name=branch)
             is_failure = branch.is_failure_path or "failure" in branch.name.lower() or "lockout" in branch.name.lower()
             is_external = branch.is_external_dependency or branch.type == NodeType.EXTERNAL_DEPENDENCY
+            is_critical = bool(branch.is_critical) or branch.criticality is not None
             child = GraphNode(
                 id=new_id("node"),
                 type=infer_node_type(branch.name, branch.type, is_failure=is_failure),
@@ -136,8 +137,9 @@ class FlowGraphIngester:
                 project_id=project_id,
                 is_failure_path=is_failure,
                 is_external_dependency=is_external,
-                is_critical=branch.criticality is not None,
-                criticality=branch.criticality,
+                is_critical=is_critical,
+                criticality=branch.criticality
+                or (Priority.HIGH if is_critical else None),
                 provenance=Provenance(
                     source_type=source_type,
                     source_reference=provenance.source_reference,

@@ -17,22 +17,54 @@ logger = get_logger(__name__)
 class OpenAIService:
     """Thin OpenAI wrapper. Falls back to deterministic demo mode without API key."""
 
+    REQUEST_TIMEOUT_SECONDS = 45.0
+    MAX_RETRIES = 1
+
     def __init__(self) -> None:
         self.settings = get_settings()
         self._client = None
+        self.last_chat_backend: str = "unavailable"
+        self.last_embed_backend: str = "unavailable"
         if self.settings.has_openai:
             try:
                 from openai import OpenAI
 
-                self._client = OpenAI(api_key=self.settings.openai_api_key)
-                logger.info("openai_client_initialized", model=self.settings.openai_model)
+                self._client = OpenAI(
+                    api_key=self.settings.openai_api_key,
+                    timeout=self.REQUEST_TIMEOUT_SECONDS,
+                    max_retries=self.MAX_RETRIES,
+                )
+                logger.info(
+                    "openai_client_initialized",
+                    model=self.settings.openai_model,
+                    timeout_s=self.REQUEST_TIMEOUT_SECONDS,
+                    # Never log the API key
+                    key_configured=True,
+                )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("openai_init_failed", error=str(exc))
+                logger.warning("openai_init_failed", error=str(exc), key_configured=True)
                 self._client = None
 
     @property
     def available(self) -> bool:
         return self._client is not None
+
+    @property
+    def configured(self) -> bool:
+        return self.settings.has_openai
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "openai_configured": self.configured,
+            "openai_client_ready": self.available,
+            "openai_model": self.settings.openai_model if self.configured else None,
+            "openai_embedding_model": (
+                self.settings.openai_embedding_model if self.configured else None
+            ),
+            "demo_fallback_enabled": self.settings.enable_demo_fallback,
+            "last_chat_backend": self.last_chat_backend,
+            "last_embed_backend": self.last_embed_backend,
+        }
 
     def chat_json(
         self,
@@ -61,6 +93,7 @@ class OpenAIService:
         strict: bool = False,
     ) -> str:
         if self._client is None:
+            self.last_chat_backend = "deterministic_fallback"
             if strict:
                 raise RuntimeError("OpenAI client unavailable")
             return self._demo_chat(system, user, json_mode=json_mode)
@@ -78,9 +111,12 @@ class OpenAIService:
 
         try:
             response = self._client.chat.completions.create(**kwargs)
+            self.last_chat_backend = "openai"
             return response.choices[0].message.content or ""
         except Exception as exc:  # noqa: BLE001
-            logger.error("openai_chat_failed", error=str(exc))
+            # Never include API key material in logs
+            logger.error("openai_chat_failed", error=str(exc)[:300])
+            self.last_chat_backend = "deterministic_fallback"
             if strict or not self.settings.enable_demo_fallback:
                 raise
             return self._demo_chat(system, user, json_mode=json_mode)
@@ -89,15 +125,18 @@ class OpenAIService:
         if not texts:
             return []
         if self._client is None:
+            self.last_embed_backend = "hash_fallback"
             return [self._hash_embed(t) for t in texts]
         try:
             response = self._client.embeddings.create(
                 model=self.settings.openai_embedding_model,
                 input=texts,
             )
+            self.last_embed_backend = "openai"
             return [item.embedding for item in response.data]
         except Exception as exc:  # noqa: BLE001
-            logger.error("openai_embed_failed", error=str(exc))
+            logger.error("openai_embed_failed", error=str(exc)[:300])
+            self.last_embed_backend = "hash_fallback"
             if self.settings.enable_demo_fallback:
                 return [self._hash_embed(t) for t in texts]
             raise
