@@ -50,6 +50,13 @@ export type AgentTraceStep = {
   detail?: string;
 };
 
+export type EvidenceReference = {
+  source_type: string;
+  source_id?: string | null;
+  source_title?: string | null;
+  relevance?: string | null;
+};
+
 export type TestCase = {
   test_case_id: string;
   title: string;
@@ -65,6 +72,9 @@ export type TestCase = {
   source_references: string[];
   confidence: string;
   assumptions: string[];
+  generation_method?: string | null;
+  reasoning?: string | null;
+  evidence?: EvidenceReference[];
 };
 
 export type QACopilotResponse = {

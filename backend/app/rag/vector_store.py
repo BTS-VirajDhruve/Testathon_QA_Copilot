@@ -128,13 +128,16 @@ class VectorStore:
                 ids = (result.get("ids") or [[]])[0]
                 for i, doc in enumerate(docs):
                     dist = dists[i] if i < len(dists) else 1.0
+                    meta = metas[i] if i < len(metas) else {}
                     hits.append(
                         {
                             "id": ids[i] if i < len(ids) else "",
                             "content": doc,
-                            "metadata": metas[i] if i < len(metas) else {},
+                            "metadata": meta,
                             "score": round(1.0 - float(dist), 4),
-                            "source_reference": (metas[i] or {}).get("source_reference"),
+                            "source_reference": (meta or {}).get("source_reference"),
+                            "document_id": (meta or {}).get("document_id"),
+                            "source_type": "requirement",
                         }
                     )
                 return hits
@@ -155,6 +158,9 @@ class VectorStore:
                         "metadata": item.get("metadata") or {},
                         "score": round(score, 4),
                         "source_reference": item.get("source_reference"),
+                        "document_id": item.get("document_id")
+                        or (item.get("metadata") or {}).get("document_id"),
+                        "source_type": "requirement",
                     },
                 )
             )

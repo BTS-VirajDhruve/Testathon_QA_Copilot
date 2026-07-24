@@ -161,19 +161,24 @@ class ContextFusionLayer:
                     graph_context.append(
                         {
                             "path": path.node_names,
+                            "node_ids": path.node_ids,
+                            "path_id": "→".join(path.node_ids) if path.node_ids else None,
                             "is_failure_path": path.is_failure_path,
                             "includes_external_dependency": path.includes_external_dependency,
                             "relationships": path.relationships,
                         }
                     )
-                for _, neighbor in self.store.neighbors(root.id, direction="both")[:30]:
+                for edge, neighbor in self.store.neighbors(root.id, direction="both")[:30]:
                     graph_context.append(
                         {
+                            "node_id": neighbor.id,
                             "entity": neighbor.name,
                             "type": neighbor.type.value,
                             "description": neighbor.description,
                             "inferred": neighbor.provenance.inferred,
                             "source_type": neighbor.provenance.source_type.value,
+                            "edge_id": edge.id,
+                            "relationship": str(edge.relationship),
                         }
                     )
 
@@ -193,6 +198,7 @@ class ContextFusionLayer:
                         "title": tc.get("title"),
                         "graph_path": tc.get("graph_path"),
                         "priority": tc.get("priority"),
+                        "source_type": "existing_test",
                     }
                 )
 
@@ -207,6 +213,7 @@ class ContextFusionLayer:
                         "severity": bug.get("severity"),
                         "affected_components": bug.get("affected_components"),
                         "graph_path": bug.get("graph_path"),
+                        "source_type": "historical_bug",
                     }
                 )
 

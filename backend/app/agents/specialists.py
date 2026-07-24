@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agents.evidence import (
+    build_evidence_catalog,
+    evidence_for_path_bugs_and_requirements,
+    legacy_source_strings,
+    sanitize_evidence,
+)
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
 from app.graph.traversal import get_coverage_engine, get_traversal
@@ -12,6 +18,7 @@ from app.models.enums import ConfidenceLevel, Priority, RiskLevel
 from app.models.schemas import (
     BugReport,
     CoverageGapResult,
+    EvidenceReference,
     ExploratoryMission,
     FusedContext,
     ImpactAnalysisResult,
@@ -79,7 +86,16 @@ Return JSON only with this shape:
       "testing_technique": "string",
       "graph_path": ["node label", "..."],
       "graph_reasoning": "string",
-      "source_references": ["string"],
+      "reasoning": "concise why-this-test explanation",
+      "source_references": ["legacy string labels only when needed"],
+      "evidence": [
+        {
+          "source_type": "graph|requirement|existing_test|historical_bug|risk",
+          "source_id": "MUST be an ID present in the context, or null",
+          "source_title": "title/label from context",
+          "relevance": "why this source supports the test"
+        }
+      ],
       "confidence": "high|medium|low",
       "assumptions": ["string"]
     }
@@ -97,6 +113,9 @@ Rules:
 8. Mark assumptions explicitly in assumptions[].
 9. Preserve graph_path traceability using labels from DISCOVERED GRAPH PATHS whenever possible.
 10. Use only information present in the context sections. If a section is empty/unavailable, do not fabricate it.
+11. For evidence: ONLY cite source_id values that appear in the provided context. Never invent IDs.
+12. If exact evidence is unavailable, omit evidence entries or leave source_id null — do not invent sources.
+13. Provide reasoning explaining why the test exists based on retrieved context.
 """
 
     def generate(self, query: str, fused: FusedContext, project_id: str) -> list[TestCase]:
@@ -117,12 +136,34 @@ Rules:
             logger.info("testcase_openai_unavailable_using_fallback")
             cases = self._generate_deterministic(query, fused, project_id)
 
+        catalog = build_evidence_catalog(fused)
         for case in cases:
             if not case.generation_method:
                 case.generation_method = method
             case.project_id = case.project_id or project_id
             if not case.feature_id:
                 case.feature_id = fused.feature_context.get("id")
+            if not case.reasoning and case.graph_reasoning:
+                case.reasoning = case.graph_reasoning
+            if not case.graph_reasoning and case.reasoning:
+                case.graph_reasoning = case.reasoning
+            # Ensure evidence is sanitized and path-linked when missing
+            case.evidence = sanitize_evidence(case.evidence, catalog)
+            if not case.evidence and case.graph_path:
+                case.evidence = evidence_for_path_bugs_and_requirements(
+                    case.graph_path, fused, catalog
+                )
+            if case.evidence and not case.source_references:
+                case.source_references = legacy_source_strings(case.evidence)
+            elif case.evidence:
+                merged = list(case.source_references) + legacy_source_strings(case.evidence)
+                seen_refs: set[str] = set()
+                unique_refs: list[str] = []
+                for s in merged:
+                    if s not in seen_refs:
+                        seen_refs.add(s)
+                        unique_refs.append(s)
+                case.source_references = unique_refs
 
         # Persist lightly for coverage matching (baseline behavior)
         store = get_graph_store()
@@ -132,13 +173,15 @@ Rules:
         return cases
 
     def build_llm_context(self, query: str, fused: FusedContext) -> dict[str, Any]:
-        """Structured context passed to the LLM — preserves fused retrieval evidence."""
+        """Structured context passed to the LLM — preserves fused retrieval evidence + IDs."""
         path_entries: list[dict[str, Any]] = []
         for item in fused.graph_context:
             if item.get("path"):
                 path_entries.append(
                     {
                         "node_labels": item.get("path"),
+                        "node_ids": item.get("node_ids") or [],
+                        "path_id": item.get("path_id"),
                         "edge_relationships": item.get("relationships") or [],
                         "path_sequence": item.get("path"),
                         "is_failure_path": bool(item.get("is_failure_path")),
@@ -152,6 +195,8 @@ Rules:
                 path_entries.append(
                     {
                         "node_labels": path,
+                        "node_ids": [],
+                        "path_id": None,
                         "edge_relationships": [],
                         "path_sequence": path,
                         "is_failure_path": False,
@@ -162,19 +207,25 @@ Rules:
         graph_entities = [
             item
             for item in fused.graph_context
-            if item.get("entity") and not item.get("path")
+            if (item.get("entity") or item.get("node_id")) and not item.get("path")
         ]
 
         requirements = []
         for hit in fused.semantic_context:
+            meta = hit.get("metadata") or {}
             requirements.append(
                 {
+                    "id": hit.get("id"),
+                    "document_id": hit.get("document_id") or meta.get("document_id"),
                     "content": hit.get("content"),
                     "score": hit.get("score"),
                     "source_reference": hit.get("source_reference") or hit.get("id"),
-                    "metadata": hit.get("metadata") or {},
+                    "metadata": meta,
+                    "source_type": "requirement",
                 }
             )
+
+        catalog = build_evidence_catalog(fused)
 
         return {
             "user_request": query,
@@ -201,6 +252,11 @@ Rules:
                 "historical_bugs": len(fused.historical_risks),
                 "external_notes": fused.external_context or [],
             },
+            "allowed_evidence_catalog": [e.model_dump() for e in catalog],
+            "evidence_rules": (
+                "Only cite source_id values from allowed_evidence_catalog. "
+                "Never invent IDs. If unsure, omit source_id."
+            ),
         }
 
     def _generate_with_llm(
@@ -262,6 +318,7 @@ Rules:
 
         feature_id = fused.feature_context.get("id")
         feature_name = fused.feature_context.get("name") or "Feature"
+        catalog = build_evidence_catalog(fused)
         valid: list[TestCase] = []
         for idx, raw in enumerate(raw_cases, start=1):
             if not isinstance(raw, dict):
@@ -287,12 +344,34 @@ Rules:
                     continue
                 if not payload.get("expected_result"):
                     payload["expected_result"] = "Behavior matches evidence-backed expectations."
+
+                # Sanitize evidence before validation — drop fabricated IDs
+                claimed_evidence = payload.pop("evidence", None) or []
+                sanitized = sanitize_evidence(claimed_evidence, catalog)
+                if not sanitized:
+                    sanitized = evidence_for_path_bugs_and_requirements(
+                        list(payload.get("graph_path") or [feature_name]),
+                        fused,
+                        catalog,
+                    )
+                payload["evidence"] = [e.model_dump() for e in sanitized]
+
+                reasoning = payload.get("reasoning") or payload.get("graph_reasoning")
+                if reasoning:
+                    payload["reasoning"] = reasoning
+                    payload.setdefault("graph_reasoning", reasoning)
                 if not payload.get("source_references"):
-                    payload["source_references"] = ["User-provided system flow graph", "LLM structured generation"]
+                    payload["source_references"] = legacy_source_strings(sanitized) or [
+                        "User-provided system flow graph"
+                    ]
+
                 case = TestCase.model_validate(payload)
                 # Re-number for stable baseline-compatible IDs
                 case.test_case_id = f"TC-{len(valid) + 1:03d}"
                 case.generation_method = "llm"
+                case.evidence = sanitized
+                if not case.reasoning:
+                    case.reasoning = case.graph_reasoning or None
                 valid.append(case)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("testcase_llm_item_invalid", index=idx, error=str(exc))
@@ -320,6 +399,7 @@ Rules:
         if not paths and fused.feature_context.get("branches"):
             paths = [[feature, b] for b in fused.feature_context["branches"]]
 
+        catalog = build_evidence_catalog(fused)
         for idx, path in enumerate(paths, start=1):
             path_list = list(path) if not isinstance(path, list) else path
             meta = path_meta.get(tuple(path_list), {})
@@ -330,18 +410,17 @@ Rules:
                 title = f"Verify existing coverage: {title}"
 
             risk = RiskLevel.HIGH if is_failure or external else RiskLevel.MEDIUM
-            related_bugs = [
-                b.get("bug_id") or b.get("title")
-                for b in fused.historical_risks
-                if any(p.lower() in str(b).lower() for p in path_list)
-            ][:3]
-            sources = ["User-provided system flow graph"]
-            if fused.semantic_context:
-                sources.append(
-                    fused.semantic_context[0].get("source_reference") or "Vector RAG requirements"
+            evidence = evidence_for_path_bugs_and_requirements(path_list, fused, catalog)
+            reasoning = (
+                f"This test covers the discovered graph path {' → '.join(path_list)}. "
+                + (
+                    "Path includes an external dependency boundary."
+                    if external
+                    else "Path represents a user-reachable authentication journey."
                 )
-            if related_bugs:
-                sources.extend([str(b) for b in related_bugs])
+                + (" Failure/negative behavior is in scope." if is_failure else "")
+            )
+            sources = legacy_source_strings(evidence) or ["User-provided system flow graph"]
 
             cases.append(
                 TestCase(
@@ -361,16 +440,10 @@ Rules:
                     expected_result=self._expected(path_list, is_failure),
                     testing_technique=_technique_for_path(path_list),
                     graph_path=path_list,
-                    graph_reasoning=(
-                        f"This test covers the discovered graph path {' → '.join(path_list)}. "
-                        + (
-                            "Path includes an external dependency boundary."
-                            if external
-                            else "Path represents a user-reachable authentication journey."
-                        )
-                        + (" Failure/negative behavior is in scope." if is_failure else "")
-                    ),
+                    graph_reasoning=reasoning,
+                    reasoning=reasoning,
                     source_references=sources,
+                    evidence=evidence,
                     confidence=ConfidenceLevel.HIGH
                     if not meta.get("inferred")
                     else ConfidenceLevel.MEDIUM,
@@ -620,6 +693,29 @@ class CriticAgent:
             # Auto-add recommended gap tests if not present
             for rec in coverage.recommended_tests[:4]:
                 if not any(rec.lower() in tc.title.lower() for tc in improved):
+                    # Prefer an uncovered branch path when available
+                    gap_path = [coverage.root_feature]
+                    for branch in coverage.uncovered_branches:
+                        if branch.lower() in rec.lower():
+                            gap_path = [coverage.root_feature, branch]
+                            break
+                    reasoning = (
+                        f"Critic added this test to address coverage gap: {rec}. "
+                        f"Critical gaps considered: {', '.join(coverage.critical_gaps[:3]) or 'n/a'}."
+                    )
+                    evidence = [
+                        EvidenceReference(
+                            source_type="coverage_gap",
+                            source_id=None,
+                            source_title=rec,
+                            relevance="Coverage engine recommended this gap-driven test",
+                        )
+                    ]
+                    # Attach real graph feature evidence when present
+                    catalog = build_evidence_catalog(fused)
+                    evidence.extend(
+                        evidence_for_path_bugs_and_requirements(gap_path, fused, catalog)[:4]
+                    )
                     improved.append(
                         TestCase(
                             test_case_id=f"TC-{len(improved)+1:03d}",
@@ -627,23 +723,35 @@ class CriticAgent:
                             category="functional",
                             priority=Priority.HIGH,
                             risk=RiskLevel.HIGH,
-                            steps=["Design and execute coverage for the identified uncovered graph branch/path."],
+                            steps=[
+                                "Design and execute coverage for the identified uncovered graph branch/path."
+                            ],
                             expected_result="Uncovered graph area gains explicit test evidence.",
                             testing_technique="Coverage-gap driven testing",
-                            graph_path=[coverage.root_feature],
-                            graph_reasoning="Added by Critic Agent to close an identified graph coverage gap.",
-                            source_references=["Coverage analysis", "User-provided system flow graph"],
+                            graph_path=gap_path,
+                            graph_reasoning=reasoning,
+                            reasoning=reasoning,
+                            source_references=legacy_source_strings(evidence),
+                            evidence=evidence,
                             confidence=ConfidenceLevel.MEDIUM,
-                            assumptions=["Gap derived from comparing graph nodes to existing test path tokens."],
+                            assumptions=[
+                                "Gap derived from comparing graph nodes to existing test path tokens."
+                            ],
+                            generation_method="critic",
                         )
                     )
                     notes.append(f"Critic added coverage-driven test: {rec}")
 
-        # Ensure every test has graph_path
+        # Ensure every test has graph_path + generation_method where possible
         for tc in improved:
             if not tc.graph_path and fused.feature_context.get("name"):
                 tc.graph_path = [fused.feature_context["name"]]
                 notes.append(f"Attached root feature path to {tc.test_case_id}")
+            if not tc.reasoning and tc.graph_reasoning:
+                tc.reasoning = tc.graph_reasoning
+            if not tc.generation_method:
+                # Preserve llm/fallback if already set; leave unknown as None only for legacy
+                pass
 
         openai = get_openai_service()
         if openai.available:

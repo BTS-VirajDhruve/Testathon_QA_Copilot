@@ -148,7 +148,12 @@ def test_testcase_agent_deterministic_path_baseline():
         assert case.testing_technique
         assert case.preconditions
         assert case.test_data
-        assert "User-provided system flow graph" in case.source_references
+        # Traceability: structured evidence and/or legacy source strings
+        assert case.evidence or case.source_references
+        assert any(e.source_type == "graph" for e in case.evidence) or any(
+            "User-provided system flow graph" in s or s.startswith("graph:")
+            for s in case.source_references
+        )
         assert case.project_id == "project_baseline"
         assert case.feature_id == "feature_signin"
         assert case.graph_reasoning
@@ -215,6 +220,8 @@ def test_copilot_query_baseline_schema_contract(client):
         "source_references",
         "confidence",
         "assumptions",
+        "generation_method",
+        "evidence",
     }
     assert len(result["test_cases"]) >= len(result["discovered_graph_paths"]) or len(
         result["test_cases"]

@@ -139,6 +139,15 @@ class DocumentRecord(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class EvidenceReference(BaseModel):
+    """Structured evidence link for explainability — never invent IDs."""
+
+    source_type: str  # graph | requirement | existing_test | historical_bug | risk | coverage_gap
+    source_id: str | None = None
+    source_title: str | None = None
+    relevance: str | None = None
+
+
 class TestCase(BaseModel):
     test_case_id: str = Field(default_factory=lambda: new_id("TC"))
     title: str
@@ -158,7 +167,11 @@ class TestCase(BaseModel):
     project_id: str | None = None
     feature_id: str | None = None
     # Additive metadata — optional for API compatibility with older clients
-    generation_method: str | None = None  # "llm" | "deterministic_fallback"
+    generation_method: str | None = None  # "llm" | "deterministic_fallback" | "critic"
+    # Short "why this test exists" — prefers explicit reasoning; may mirror graph_reasoning
+    reasoning: str | None = None
+    # Structured evidence (preferred). source_references remains the legacy string list.
+    evidence: list[EvidenceReference] = Field(default_factory=list)
 
 
 class ExploratoryMission(BaseModel):

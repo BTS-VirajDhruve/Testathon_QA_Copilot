@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { AppView, QACopilotResponse } from "@/lib/types";
+import type { AppView, QACopilotResponse, TestCase } from "@/lib/types";
+import { TestCaseEvidenceCard } from "@/components/TestCaseEvidenceCard";
 
 export function ArtifactLists({
   view,
@@ -23,38 +24,32 @@ export function ArtifactLists({
   }, [projectId, result]);
 
   if (view === "tests") {
-    const items = result?.test_cases?.length
+    const items: TestCase[] = result?.test_cases?.length
       ? result.test_cases
       : tests.map((t) => ({
           test_case_id: String(t.test_case_id || ""),
           title: String(t.title || ""),
           graph_path: (t.graph_path as string[]) || [],
-          graph_reasoning: "",
-          source_references: [],
-          confidence: "medium",
+          graph_reasoning: String(t.graph_reasoning || ""),
+          reasoning: (t.reasoning as string) || null,
+          source_references: (t.source_references as string[]) || [],
+          evidence: (t.evidence as TestCase["evidence"]) || [],
+          generation_method: (t.generation_method as string) || null,
+          confidence: String(t.confidence || "medium"),
           priority: String(t.priority || "medium"),
-          risk: "medium",
+          risk: String(t.risk || "medium"),
           category: String(t.category || ""),
           preconditions: [],
-          steps: [],
-          expected_result: "",
+          steps: (t.steps as string[]) || [],
+          expected_result: String(t.expected_result || ""),
           testing_technique: "",
           assumptions: [],
         }));
     return (
-      <Panel title="Test Cases" subtitle="Path-linked generated and existing tests">
+      <Panel title="Test Cases" subtitle="Explainable path-linked tests with evidence">
         <div className="grid gap-3 lg:grid-cols-2">
           {items.map((tc) => (
-            <article key={tc.test_case_id} className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
-              <div className="text-xs text-ink-600/60">{tc.test_case_id}</div>
-              <h3 className="mt-1 font-medium">{tc.title}</h3>
-              <div className="mt-2 font-mono text-xs text-pine-700">
-                {(tc.graph_path || []).join(" → ")}
-              </div>
-              {tc.graph_reasoning ? (
-                <p className="mt-2 text-sm text-ink-700/75">{tc.graph_reasoning}</p>
-              ) : null}
-            </article>
+            <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} />
           ))}
         </div>
       </Panel>

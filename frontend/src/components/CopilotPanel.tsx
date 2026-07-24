@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import type { QACopilotResponse } from "@/lib/types";
+import { TestCaseEvidenceCard } from "@/components/TestCaseEvidenceCard";
 
 const SUGGESTIONS = [
   "Generate comprehensive QA coverage for Sign In.",
@@ -116,24 +117,10 @@ export function CopilotPanel({
 
       {result && (
         <div className="panel col-span-full p-6">
-          <div className="label">Recommended tests with graph paths</div>
+          <div className="label">Recommended tests with evidence</div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             {result.test_cases.slice(0, 8).map((tc) => (
-              <article key={tc.test_case_id} className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-medium text-ink-900">{tc.title}</h3>
-                  <span className="rounded-full bg-mist-100 px-2 py-0.5 text-[11px] uppercase tracking-wide">
-                    {tc.priority}
-                  </span>
-                </div>
-                <div className="mt-2 font-mono text-xs text-pine-700">
-                  {tc.graph_path.join(" → ")}
-                </div>
-                <p className="mt-2 text-sm text-ink-700/75">{tc.graph_reasoning}</p>
-                <div className="mt-3 text-xs text-ink-600/70">
-                  Sources: {tc.source_references.join(" · ")} · Confidence: {tc.confidence}
-                </div>
-              </article>
+              <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} />
             ))}
           </div>
         </div>
