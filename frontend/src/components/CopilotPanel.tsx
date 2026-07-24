@@ -228,7 +228,7 @@ export function CopilotPanel({
         )}
       </div>
 
-      {result && (result.coverage_before || result.targeted_test_cases?.length || result.selected_coverage_gaps?.length) ? (
+      {result ? (
         <div className="col-span-full">
           <RegenerationLoopPanel result={result} />
         </div>

@@ -5,8 +5,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    # Optional — create via `cp .env.example .env` (not required for default demo)
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ./backend/data:/app/data
       - ./sample_data:/app/sample_data:ro
@@ -17,6 +19,7 @@ services:
       DATA_DIR: /app/data
       CHROMA_DIR: /app/data/chroma
       GRAPH_STORE_PATH: /app/data/graph_store.json
+      ENABLE_DEMO_FALLBACK: ${ENABLE_DEMO_FALLBACK:-true}
 
   frontend:
     build:
@@ -29,7 +32,7 @@ services:
     depends_on:
       - api
 
-  # Optional — enable with NEO4J_ENABLED=true and uncomment depends_on on api
+  # Optional — enable with: NEO4J_ENABLED=true docker compose --profile neo4j up --build
   neo4j:
     image: neo4j:5.26-community
     profiles: ["neo4j"]

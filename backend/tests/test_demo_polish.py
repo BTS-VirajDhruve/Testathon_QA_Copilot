@@ -213,7 +213,8 @@ def test_coverage_loop_no_gaps_when_disabled(client):
     assert result["coverage_before"] is not None
 
 
-def test_coverage_loop_with_high_priority_gaps(client):
+def test_demo_copilot_loop_reserves_high_risk_for_targeted(client):
+    """Demo seed + curated query must show Initial → Gaps → Targeted (not 100% after initial)."""
     seed = client.post("/api/demo/seed").json()
     result = client.post(
         "/api/copilot/query",
@@ -221,17 +222,27 @@ def test_coverage_loop_with_high_priority_gaps(client):
             "project_id": seed["project_id"],
             "query": seed["demo_query"],
             "root_feature": "Sign In",
+            "include_critic": True,
             "enable_targeted_regeneration": True,
             "max_regeneration_rounds": 1,
-            "max_gaps_per_round": 4,
         },
     ).json()
-    # Demo is designed so SSO / failure gaps exist before targeted regen
-    assert result["coverage_before"]["total_paths"] >= 1
-    # Either targeted tests were added OR prioritization found none after initial gen covered them
-    assert isinstance(result["selected_coverage_gaps"], list)
-    assert isinstance(result["targeted_test_cases"], list)
+    assert result["intent"] == "test_generation"
+    assert result["initial_test_cases"]
+    assert result["coverage_before"] is not None
+    assert result["coverage_after"] is not None
+    # Deterministic initial gen reserves SSO Timeout / Account Lockout for critic
+    assert result["coverage_before"]["coverage_percentage"] < 100.0
+    assert result["selected_coverage_gaps"] or result["targeted_test_cases"]
     if result["targeted_test_cases"]:
         assert result["regeneration_rounds"] >= 1
         assert all(tc.get("generation_method") == "critic" for tc in result["targeted_test_cases"])
+        assert all(tc.get("closes_gap_id") or tc.get("closes_gap_title") for tc in result["targeted_test_cases"])
         assert result["coverage_after"]["covered_paths"] >= result["coverage_before"]["covered_paths"]
+    # Trace honesty: skipped or complete targeted step is present
+    steps = " | ".join(s["step"] for s in result["execution_trace"])
+    assert "Initial Test Generation" in steps
+    assert "Critic Review" in steps
+    assert "Coverage Gap" in steps or "Gap Prioritization" in steps
+    assert result["generation_backend"] in {"deterministic_fallback", "mixed", "openai"}
+
