@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -28,9 +28,10 @@ class Settings(BaseSettings):
     neo4j_password: str = "password"
     neo4j_enabled: bool = False
 
-    data_dir: str = "./backend/data"
-    chroma_dir: str = "./backend/data/chroma"
-    graph_store_path: str = "./backend/data/graph_store.json"
+    # Paths are relative to the backend working directory (cd backend).
+    data_dir: str = "./data"
+    chroma_dir: str = "./data/chroma"
+    graph_store_path: str = "./data/graph_store.json"
     enable_demo_fallback: bool = True
 
     @property

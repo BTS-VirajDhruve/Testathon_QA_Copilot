@@ -12,9 +12,29 @@ This is not a simple chatbot. The system understands the software under test *be
 
 ---
 
-## Quick start
+## Prerequisites
 
-### 1. Environment
+- **Python 3.11+** (3.12 recommended; see `backend/.python-version`)
+- **[uv](https://docs.astral.sh/uv/)** for backend dependency management
+- **Node.js 20+** and **npm** for the frontend
+
+### Install uv
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Restart the terminal (or refresh `PATH`) so `uv` is available.
+
+---
+
+## Environment
+
+From the repository root:
 
 ```bash
 cp .env.example .env
@@ -22,17 +42,40 @@ cp .env.example .env
 # OPENAI_API_KEY=sk-...
 ```
 
-Without an OpenAI key the API runs in **deterministic demo fallback mode** (hash embeddings + heuristic agents) so the hackathon demo still works end-to-end.
+You may also place `.env` inside `backend/` (settings load from the process working directory).
 
-### 2. Backend
+Without an OpenAI key the API runs in **deterministic demo fallback mode** so the hackathon demo still works end-to-end.
+
+---
+
+## Backend setup (uv — required)
+
+**Working directory must be `backend/`.** Do not run `uvicorn` from the repo root, and do not rely on a globally installed `uvicorn`.
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export PYTHONPATH=.
-uvicorn app.main:app --reload --port 8000
+uv sync --extra dev
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Or use the Makefile:
+
+```bash
+cd backend
+make sync
+make dev
+```
+
+### Why `uv run`?
+
+`uvicorn: command not found` happens when the shell looks for a **global** `uvicorn` executable. This project installs uvicorn into the project virtualenv managed by uv. Always start the API with `uv run ...` so the correct environment is used.
+
+`uv sync` also installs this package in editable mode, so `app.main:app` imports correctly without setting `PYTHONPATH`.
+
+### Verify backend
+
+- Health: [http://localhost:8000/api/health](http://localhost:8000/api/health)
+- OpenAPI docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 Seed the Sign In demo:
 
@@ -40,7 +83,30 @@ Seed the Sign In demo:
 curl -X POST http://localhost:8000/api/demo/seed
 ```
 
-### 3. Frontend
+### Backend tests
+
+```bash
+cd backend
+uv sync --extra dev
+uv run pytest -q
+```
+
+### Pip fallback (not preferred)
+
+`requirements.txt` is kept in sync for Docker/legacy pip users, but **uv is the supported workflow**:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+uvicorn app.main:app --reload --port 8000
+```
+
+---
+
+## Frontend setup
 
 ```bash
 cd frontend
@@ -50,7 +116,9 @@ NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### 4. Docker (optional)
+---
+
+## Docker (optional)
 
 ```bash
 docker compose up --build
@@ -120,6 +188,7 @@ USER QUERY
 
 ## API highlights
 
+- `GET /api/health` — health check
 - `POST /api/projects` — create project (+ optional root feature)
 - `PUT /api/projects/{id}/flow` — save visual system flow graph
 - `POST /api/projects/{id}/flow/import` — nested JSON import
@@ -153,15 +222,6 @@ User-provided facts are never silently overwritten by inferred relationships.
 
 ---
 
-## Tests
-
-```bash
-cd backend
-PYTHONPATH=. pytest -q
-```
-
----
-
 ## Design notes
 
 UI direction: premium, enterprise, spacious, editorial — calm presentation of complex QA/graph data. Inspired by polished professional service sites (information architecture & typography only; no cloned assets/branding).
@@ -177,9 +237,10 @@ Color system: deep ink greens, mist surfaces, brass accents (not purple-gradient
 | `OPENAI_API_KEY` | LLM + embeddings |
 | `OPENAI_MODEL` | Chat model (default `gpt-4o-mini`) |
 | `OPENAI_EMBEDDING_MODEL` | Embeddings model |
-| `NEO4J_ENABLED` | Optional Neo4j sync |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Optional Neo4j connection |
+| `NEO4J_ENABLED` | Optional Neo4j sync (`false` by default) |
 | `ENABLE_DEMO_FALLBACK` | Deterministic offline mode |
-| `GRAPH_STORE_PATH` | Persistent graph JSON |
-| `CHROMA_DIR` | Chroma persistence |
+| `DATA_DIR` / `CHROMA_DIR` / `GRAPH_STORE_PATH` | Persistence paths (relative to `backend/`) |
+| `CORS_ORIGINS` | Allowed frontend origins |
 
 Never hardcode API keys.

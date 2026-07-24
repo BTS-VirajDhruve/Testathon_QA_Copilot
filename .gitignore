@@ -15,3 +15,5 @@ frontend/out/
 .DS_Store
 dist/
 build/
+.python-version.local
+uv-cache/

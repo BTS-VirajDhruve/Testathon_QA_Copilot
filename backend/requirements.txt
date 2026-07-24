@@ -1,3 +1,10 @@
+# Keep this file in sync with pyproject.toml for environments that still use pip.
+# Preferred workflow: use uv from the backend/ directory (`uv sync`, `uv run ...`).
+#
+#   cd backend
+#   uv sync --extra dev
+#   uv run uvicorn app.main:app --reload --port 8000
+
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
