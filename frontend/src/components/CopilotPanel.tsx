@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Loader2, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch, Loader2, Send, ShieldAlert, Sparkles } from "lucide-react";
 import type { QACopilotResponse } from "@/lib/types";
 import { TestCaseEvidenceCard } from "@/components/TestCaseEvidenceCard";
 import { RegenerationLoopPanel } from "@/components/RegenerationLoopPanel";
@@ -49,12 +49,16 @@ export function CopilotPanel({
   onQuery,
   projectReady,
   initialQuery,
+  projectName,
+  rootFeature,
 }: {
   busy: boolean;
   result: QACopilotResponse | null;
   onQuery: (query: string, changedNode?: string) => void;
   projectReady: boolean;
   initialQuery?: string | null;
+  projectName?: string | null;
+  rootFeature?: string | null;
 }) {
   const [query, setQuery] = useState(initialQuery || SUGGESTIONS[0]);
   const [changedNode, setChangedNode] = useState("");
@@ -71,8 +75,10 @@ export function CopilotPanel({
       tests: result.test_cases?.length ?? 0,
       initial: result.initial_test_cases?.length ?? 0,
       targeted: result.targeted_test_cases?.length ?? 0,
-      gaps: result.selected_coverage_gaps?.length ?? 0,
+      gapsFound: result.coverage_before?.gaps?.length ?? 0,
+      gapsSelected: result.selected_coverage_gaps?.length ?? 0,
       unresolved: result.unresolved_gaps?.length ?? 0,
+      duplicatesRemoved: result.duplicates_removed ?? 0,
       before,
       after,
       backend: result.generation_backend,
@@ -80,6 +86,10 @@ export function CopilotPanel({
       fused: result.fused_context_summary,
     };
   }, [result]);
+
+  const testedLabel = projectReady
+    ? `${projectName || "Project"} → ${rootFeature || result?.root_feature || "Sign In"}`
+    : "Load a demo project to begin";
 
   function applySuggestion(s: string) {
     setQuery(s);
@@ -93,16 +103,38 @@ export function CopilotPanel({
   return (
     <section className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
       <div className="panel p-6">
-        <div className="label">QA Copilot</div>
-        <h2 className="mt-2 font-display text-2xl">Ask with system flow context</h2>
-        <p className="mt-2 text-sm text-ink-700/75">
-          One action runs the real pipeline: Graph RAG + Vector RAG → initial tests → critic →
-          coverage gaps → targeted regeneration → final coverage.
-        </p>
+        <div className="label">QA Copilot · hero workflow</div>
+        <h2 className="mt-2 font-display text-2xl">Evidence-backed agentic QA</h2>
+
+        <div className="mt-4 rounded-2xl border border-ink-700/10 bg-gradient-to-br from-mist-100/90 to-white/80 p-4">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-600/60">What is being tested?</div>
+          <div className="mt-1 flex items-start gap-2 font-display text-xl text-ink-900">
+            <GitBranch className="mt-1 h-5 w-5 shrink-0 text-pine-700" />
+            <span>{testedLabel}</span>
+          </div>
+
+          <div className="mt-4 text-[11px] uppercase tracking-[0.14em] text-ink-600/60">What context is used?</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            {["System Flow Graph", "Requirements", "Existing Tests", "Historical Bugs"].map((c) => (
+              <span key={c} className="rounded-full border border-ink-700/10 bg-white/90 px-2.5 py-1 text-ink-800">
+                {c}
+              </span>
+            ))}
+          </div>
+
+          <div className="mt-4 text-[11px] uppercase tracking-[0.14em] text-ink-600/60">What will the AI do?</div>
+          <ol className="mt-2 space-y-1 text-sm text-ink-700/85">
+            <li>1. Generate evidence-backed tests (Graph RAG + Vector RAG)</li>
+            <li>2. Critic reviews for path completeness</li>
+            <li>3. Find and prioritize high-risk coverage gaps</li>
+            <li>4. Generate targeted tests only for selected gaps</li>
+            <li>5. Show improved coverage before → after</li>
+          </ol>
+        </div>
 
         {!projectReady && (
           <div className="mt-4 rounded-xl border border-brass-500/30 bg-brass-500/10 px-4 py-3 text-sm">
-            Load the Demo Project or define a system flow graph before running the copilot.
+            Click <strong>Load Demo Project</strong> in the top bar first — then run the curated query below.
           </div>
         )}
 
@@ -114,7 +146,7 @@ export function CopilotPanel({
         ) : null}
 
         <textarea
-          className="mt-5 min-h-32 w-full rounded-2xl border border-ink-700/15 bg-white/80 p-4 text-sm outline-none focus:border-pine-500"
+          className="mt-5 min-h-28 w-full rounded-2xl border border-ink-700/15 bg-white/80 p-4 text-sm outline-none focus:border-pine-500"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={busy}
@@ -135,7 +167,7 @@ export function CopilotPanel({
               onClick={() => applySuggestion(s)}
               disabled={busy}
             >
-              {s.length > 72 ? `${s.slice(0, 72)}…` : s}
+              {s.length > 64 ? `${s.slice(0, 64)}…` : s}
             </button>
           ))}
         </div>
@@ -153,9 +185,17 @@ export function CopilotPanel({
       <div className="panel p-6">
         <div className="label">Latest analysis</div>
         {!result ? (
-          <p className="mt-3 text-sm text-ink-600/70">
-            No analysis yet. Load the demo and run the suggested Sign In query.
-          </p>
+          <div className="mt-3 space-y-3 text-sm text-ink-700/75">
+            <p>No analysis yet. After loading the demo, run the curated Sign In query.</p>
+            <div className="rounded-2xl border border-dashed border-ink-700/15 bg-mist-100/50 p-4">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-600/70">
+                <Sparkles className="h-3.5 w-3.5" /> Expected story
+              </div>
+              <p className="mt-2 font-mono text-xs leading-relaxed text-ink-800">
+                INITIAL ANALYSIS → CRITIC → COVERAGE GAPS → TARGETED TESTS → FINAL COVERAGE
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="mt-3 space-y-4">
             <div className="rounded-2xl bg-ink-900 px-4 py-4 text-mist-50">
@@ -168,7 +208,12 @@ export function CopilotPanel({
               </div>
               {summary?.backend ? (
                 <div className="mt-3 inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[11px] uppercase tracking-wide">
-                  Generation: {summary.backend === "openai" ? "OpenAI" : summary.backend.replaceAll("_", " ")}
+                  Generation:{" "}
+                  {summary.backend === "openai"
+                    ? "OpenAI (LLM)"
+                    : summary.backend === "deterministic_fallback"
+                      ? "Deterministic fallback"
+                      : summary.backend.replaceAll("_", " ")}
                 </div>
               ) : null}
             </div>
@@ -183,12 +228,14 @@ export function CopilotPanel({
                   </div>
                 </div>
                 <div className="rounded-xl bg-mist-100/80 px-3 py-2">
-                  <div className="text-[11px] uppercase tracking-wide text-ink-600/60">Coverage</div>
+                  <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-ink-600/60">
+                    <ShieldAlert className="h-3 w-3" /> Coverage
+                  </div>
                   <div className="font-display text-xl">
                     {summary.before ?? "—"}% → {summary.after ?? "—"}%
                   </div>
                   <div className="text-xs text-ink-600/70">
-                    {summary.gaps} high-priority gaps selected
+                    {summary.gapsSelected} high-priority · {summary.duplicatesRemoved} dupes removed
                   </div>
                 </div>
               </div>
@@ -197,7 +244,10 @@ export function CopilotPanel({
             <Expand title="Context used (Graph + Vector RAG)" defaultOpen>
               <ul className="space-y-1 text-sm text-ink-700/80">
                 <li>• Feature: {result.fused_context_summary?.feature || result.root_feature || "—"}</li>
-                <li>• Graph paths: {result.fused_context_summary?.flow_paths ?? result.discovered_graph_paths?.length ?? 0}</li>
+                <li>
+                  • Graph paths:{" "}
+                  {result.fused_context_summary?.flow_paths ?? result.discovered_graph_paths?.length ?? 0}
+                </li>
                 <li>• Vector hits: {result.fused_context_summary?.semantic_hits ?? 0}</li>
                 <li>• Existing tests: {result.fused_context_summary?.existing_tests ?? 0}</li>
                 <li>• Historical bugs: {result.fused_context_summary?.historical_bugs ?? 0}</li>
@@ -207,7 +257,7 @@ export function CopilotPanel({
               ) : null}
             </Expand>
 
-            <Expand title={`Critic findings (${result.critic_notes?.length ?? 0})`}>
+            <Expand title={`Critic findings (${result.critic_notes?.length ?? 0})`} defaultOpen>
               {(result.critic_notes || []).length ? (
                 <ul className="space-y-1 text-sm">
                   {result.critic_notes.slice(0, 8).map((n) => (
@@ -238,9 +288,9 @@ export function CopilotPanel({
         <div className="panel col-span-full p-6">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-              <div className="label">Generated tests with evidence</div>
+              <div className="label">Generated tests · why they exist</div>
               <p className="mt-1 text-sm text-ink-700/70">
-                Showing up to 8 cases. Open Test Cases for the full set.
+                Open a card for reasoning, graph path, evidence, and generation method. Showing up to 8.
               </p>
             </div>
             <div className="text-xs text-ink-600/70">
@@ -248,9 +298,17 @@ export function CopilotPanel({
             </div>
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            {(result.test_cases || []).slice(0, 8).map((tc) => (
-              <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} />
-            ))}
+            {/* Prefer showing a critic-targeted case first for the "why" moment */}
+            {[
+              ...(result.targeted_test_cases || []).slice(0, 2),
+              ...(result.test_cases || []).filter(
+                (tc) => !(result.targeted_test_cases || []).some((t) => t.test_case_id === tc.test_case_id)
+              ),
+            ]
+              .slice(0, 8)
+              .map((tc) => (
+                <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} emphasizeWhy={true} />
+              ))}
             {(result.test_cases || []).length === 0 ? (
               <p className="text-sm text-ink-600/70">No tests were generated for this query.</p>
             ) : null}

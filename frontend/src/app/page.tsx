@@ -260,9 +260,31 @@ export default function HomePage() {
                 Agentic QA Copilot
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-700/80 md:text-base">
-                Load the Enterprise Authentication Portal demo, inspect the Sign In system flow,
-                then run one Copilot action for evidence-backed tests, critic gaps, and targeted
+                Understands your software via a system-flow graph + QA knowledge, then generates
+                evidence-backed tests, finds high-risk gaps, and closes them with targeted
                 regeneration.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button className="btn-brass" onClick={handleSeed} disabled={busy || booting}>
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Load Demo Project
+                </button>
+                {selectedProject ? (
+                  <span className="rounded-full bg-mist-100 px-3 py-1.5 text-xs text-ink-700">
+                    Loaded: <strong className="text-ink-900">{selectedProject.name}</strong>
+                    {graph?.nodes.find((n) => n.id === graph.root_node_id)?.name
+                      ? ` · ${graph.nodes.find((n) => n.id === graph.root_node_id)?.name}`
+                      : ""}
+                  </span>
+                ) : (
+                  <span className="text-xs text-ink-600/70">
+                    Start here — no backend knowledge required.
+                  </span>
+                )}
+              </div>
+              <p className="mt-3 font-mono text-[11px] leading-relaxed text-ink-600/70 md:text-xs">
+                System flow + QA knowledge → Graph RAG + Vector RAG → evidence-backed tests → Critic →
+                coverage gaps → targeted tests → improved coverage
               </p>
             </div>
             <div className="px-6 py-5">
@@ -277,6 +299,8 @@ export default function HomePage() {
               onQuery={handleQuery}
               projectReady={Boolean(projectId && graph?.nodes.length)}
               initialQuery={demoQuery}
+              projectName={selectedProject?.name}
+              rootFeature={graph?.nodes.find((n) => n.id === graph.root_node_id)?.name}
             />
           )}
           {view === "flow" && graph && projectId && (
@@ -317,12 +341,12 @@ export default function HomePage() {
                 historical bugs, and existing tests — then run the QA Copilot.
               </p>
               <div className="mt-5 flex justify-center gap-3">
-                <button className="btn-primary" onClick={handleCreateProject} disabled={busy}>
-                  Create project
-                </button>
                 <button className="btn-brass" onClick={handleSeed} disabled={busy}>
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   Load Demo Project
+                </button>
+                <button className="btn-secondary" onClick={handleCreateProject} disabled={busy}>
+                  Create project
                 </button>
               </div>
             </div>

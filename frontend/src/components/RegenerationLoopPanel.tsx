@@ -72,6 +72,14 @@ function GapList({ title, gaps }: { title: string; gaps: CoverageGap[] }) {
   );
 }
 
+const STORY_STEPS = [
+  "Initial analysis",
+  "Critic review",
+  "Coverage gaps",
+  "Targeted tests",
+  "Final coverage",
+] as const;
+
 export function RegenerationLoopPanel({ result }: { result: QACopilotResponse }) {
   const initialCount = result.initial_test_cases?.length ?? 0;
   const targeted = result.targeted_test_cases || [];
@@ -79,60 +87,71 @@ export function RegenerationLoopPanel({ result }: { result: QACopilotResponse })
   const unresolved = result.unresolved_gaps || [];
   const gapsFound = result.coverage_before?.gaps?.length ?? selected.length + unresolved.length;
   const duplicatesRemoved = result.duplicates_removed ?? 0;
+  const remaining = unresolved.length;
 
   return (
     <section className="panel p-6">
-      <div className="label">Coverage improvement loop</div>
-      <h2 className="mt-2 font-display text-2xl">Initial → Critic gaps → Targeted → Final</h2>
+      <div className="label">Agentic coverage loop</div>
+      <h2 className="mt-2 font-display text-2xl">Initial → Critic → Gaps → Targeted → Final</h2>
       <p className="mt-2 text-sm text-ink-700/75">
-        Metrics come from the live coverage engine — not hardcoded demo numbers.
+        All metrics below are live API values from this run — nothing is hardcoded for the demo.
       </p>
 
-      <div className="mt-5 flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-wide text-ink-700/70">
-        <span className="rounded-full bg-mist-100 px-3 py-1">Initial coverage</span>
-        <span aria-hidden>↓</span>
-        <span className="rounded-full bg-mist-100 px-3 py-1">Critic found gaps</span>
-        <span aria-hidden>↓</span>
-        <span className="rounded-full bg-mist-100 px-3 py-1">Targeted tests</span>
-        <span aria-hidden>↓</span>
-        <span className="rounded-full bg-mist-100 px-3 py-1">Final coverage</span>
+      <div className="mt-5 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-800">
+        {STORY_STEPS.map((label, i) => (
+          <span key={label} className="flex items-center gap-2">
+            <span className="rounded-full bg-ink-900 px-3 py-1.5 text-mist-50">{label}</span>
+            {i < STORY_STEPS.length - 1 ? <span aria-hidden className="text-ink-600/50">↓</span> : null}
+          </span>
+        ))}
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl bg-ink-900 p-4 text-mist-50">
-          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">Initial</div>
-          <div className="mt-1 font-display text-3xl">{initialCount} tests</div>
-          <div className="mt-1 text-sm text-mist-200">
+          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">1 · Initial</div>
+          <div className="mt-1 font-display text-3xl">{initialCount}</div>
+          <div className="text-sm text-mist-200">tests generated</div>
+          <div className="mt-2 text-sm text-mist-200">
+            Coverage {result.coverage_before ? pct(result.coverage_before.coverage_percentage) : "—"}
             {result.coverage_before
-              ? `${result.coverage_before.covered_paths}/${result.coverage_before.total_paths} paths · ${pct(result.coverage_before.coverage_percentage)}`
-              : "—"}
+              ? ` · ${result.coverage_before.covered_paths}/${result.coverage_before.total_paths} paths`
+              : ""}
           </div>
         </div>
         <div className="rounded-2xl bg-ink-900 p-4 text-mist-50">
-          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">Critic</div>
-          <div className="mt-1 font-display text-3xl">{gapsFound} gaps</div>
-          <div className="mt-1 text-sm text-mist-200">{selected.length} high-priority selected</div>
+          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">2 · Critic / gaps</div>
+          <div className="mt-1 font-display text-3xl">{gapsFound}</div>
+          <div className="text-sm text-mist-200">gaps found</div>
+          <div className="mt-2 text-sm text-mist-200">
+            {selected.length} high-priority selected · {result.critic_notes?.length ?? 0} critic notes
+          </div>
         </div>
         <div className="rounded-2xl bg-ink-900 p-4 text-mist-50">
-          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">Targeted</div>
-          <div className="mt-1 font-display text-3xl">{targeted.length} tests</div>
-          <div className="mt-1 text-sm text-mist-200">{duplicatesRemoved} duplicates removed</div>
+          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">3 · Targeted</div>
+          <div className="mt-1 font-display text-3xl">{targeted.length}</div>
+          <div className="text-sm text-mist-200">targeted tests</div>
+          <div className="mt-2 text-sm text-mist-200">{duplicatesRemoved} duplicates removed</div>
         </div>
         <div className="rounded-2xl bg-ink-900 p-4 text-mist-50">
-          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">Final</div>
-          <div className="mt-1 font-display text-3xl">{result.test_cases?.length ?? 0} tests</div>
-          <div className="mt-1 text-sm text-mist-200">
+          <div className="text-xs uppercase tracking-[0.14em] text-brass-400">4 · Final</div>
+          <div className="mt-1 font-display text-3xl">
+            {result.coverage_after ? pct(result.coverage_after.coverage_percentage) : "—"}
+          </div>
+          <div className="text-sm text-mist-200">
+            {result.test_cases?.length ?? 0} tests · {remaining} remaining gaps
+          </div>
+          <div className="mt-2 text-sm text-mist-200">
             {result.coverage_after
-              ? `${result.coverage_after.covered_paths}/${result.coverage_after.total_paths} paths · ${pct(result.coverage_after.coverage_percentage)}`
+              ? `${result.coverage_after.covered_paths}/${result.coverage_after.total_paths} paths`
               : "—"}
           </div>
         </div>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <SnapshotCard label="Initial coverage" snap={result.coverage_before} testCount={initialCount} />
+        <SnapshotCard label="Coverage before" snap={result.coverage_before} testCount={initialCount} />
         <SnapshotCard
-          label="Final coverage"
+          label="Coverage after"
           snap={result.coverage_after}
           testCount={result.test_cases?.length}
         />
@@ -143,21 +162,21 @@ export function RegenerationLoopPanel({ result }: { result: QACopilotResponse })
           Regeneration rounds: <strong>{result.regeneration_rounds ?? 0}</strong>
         </div>
         <div>
-          Remaining unresolved gaps: <strong>{unresolved.length}</strong>
+          Remaining unresolved gaps: <strong>{remaining}</strong>
         </div>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <GapList title="Selected coverage gaps" gaps={selected} />
+        <GapList title="Selected high-priority gaps" gaps={selected} />
         <GapList title="Remaining unresolved gaps" gaps={unresolved} />
       </div>
 
       {targeted.length > 0 ? (
         <div className="mt-6">
-          <div className="label mb-3">Critic-targeted tests</div>
+          <div className="label mb-3">Critic-targeted tests · why they exist</div>
           <div className="grid gap-3 lg:grid-cols-2">
             {targeted.map((tc: TestCase) => (
-              <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} />
+              <TestCaseEvidenceCard key={tc.test_case_id} tc={tc} emphasizeWhy />
             ))}
           </div>
         </div>
