@@ -121,7 +121,11 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Docker (optional)
 
 ```bash
+# Fastest demo path (JSON graph store; Neo4j off)
 docker compose up --build
+
+# Optional Neo4j profile
+NEO4J_ENABLED=true docker compose --profile neo4j up --build
 ```
 
 Neo4j is optional (`NEO4J_ENABLED=false` by default). The primary graph store is a durable JSON knowledge graph with optional Neo4j sync.
@@ -130,19 +134,20 @@ Neo4j is optional (`NEO4J_ENABLED=false` by default). The primary graph store is
 
 ## Demo workflow
 
-1. Click **Load demo** (Auth Platform Demo / Sign In).
-2. Open **System Flow** — inspect the nested auth graph.
-3. Open **QA Copilot** and run:
+1. Click **Load Demo Project** (Enterprise Authentication Portal / Sign In).
+2. Inspect **System Flow** — Email + Password, Google OAuth, Microsoft Enterprise SSO, Self Registration.
+3. Open **Knowledge Base** — requirements are already seeded (optional: add more notes).
+4. On **QA Copilot**, run the curated query:
 
-   > Generate comprehensive QA coverage for Sign In.
+   > Analyze the Sign In flow. Generate comprehensive tests focused on security, negative scenarios, historical bugs, and uncovered branches. Then identify coverage gaps and generate targeted tests for the highest-risk gaps.
 
-4. Review:
+5. Review:
+   - Context used (Graph RAG + Vector RAG)
+   - Initial tests + evidence
+   - Critic findings
+   - Coverage before → targeted tests → coverage after
    - Agent execution trace
-   - Path-linked test cases
-   - Exploratory missions
-   - Coverage gaps (with calculation notes)
-   - Sources, confidence, assumptions
-5. Try impact analysis:
+6. Try impact analysis:
 
    > What components are impacted if Google OAuth changes?
 

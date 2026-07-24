@@ -94,6 +94,7 @@ class NestedBranch(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     is_failure_path: bool = False
     is_external_dependency: bool = False
+    is_critical: bool = False
     criticality: Priority | None = None
 
 
@@ -345,6 +346,10 @@ class QACopilotResponse(BaseModel):
     coverage_after: CoverageSnapshot | None = None
     regeneration_rounds: int = 0
     unresolved_gaps: list[CoverageGap] = Field(default_factory=list)
+    # Phase 5 additive demo/reliability fields
+    duplicates_removed: int = 0
+    generation_backend: str | None = None  # openai | deterministic_fallback | mixed
+    runtime_diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphPath(BaseModel):

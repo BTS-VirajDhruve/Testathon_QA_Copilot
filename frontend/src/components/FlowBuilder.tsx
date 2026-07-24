@@ -218,19 +218,31 @@ function FlowBuilderInner({
   }
 
   async function handleImportJson() {
-    const payload = JSON.parse(importJson || "{}");
-    await api.importFlow(projectId, payload);
-    await onImported();
+    try {
+      const payload = JSON.parse(importJson || "{}");
+      await api.importFlow(projectId, payload);
+      await onImported();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Import failed");
+    }
   }
 
   async function handleNl() {
-    await api.flowFromText(projectId, nlText);
-    await onImported();
+    try {
+      await api.flowFromText(projectId, nlText);
+      await onImported();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Natural-language graph generation failed");
+    }
   }
 
   async function handleExport() {
-    const exported = await api.exportFlow(projectId);
-    downloadJson(`${projectId}-flow.json`, exported);
+    try {
+      const exported = await api.exportFlow(projectId);
+      downloadJson(`${projectId}-flow.json`, exported);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Export failed");
+    }
   }
 
   function resetRoot() {

@@ -233,6 +233,9 @@ def test_copilot_query_baseline_schema_contract(client):
 
     # Critic may add cases, but baseline still exposes trace + evidence
     assert result["execution_trace"]
-    assert any("Test Cases Generated" in step["step"] for step in result["execution_trace"])
+    assert any(
+        "Initial Test Generation" in step["step"] or "Test Cases Generated" in step["step"]
+        for step in result["execution_trace"]
+    )
     assert result["evidence"]
     assert "User-provided system flow graph" in result["evidence"]

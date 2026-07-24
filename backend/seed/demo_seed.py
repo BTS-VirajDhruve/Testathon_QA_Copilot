@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,15 +15,16 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.graph.ingestion import get_flow_ingester
 from app.graph.store import get_graph_store
-from app.models.enums import RiskLevel
 from app.models.schemas import NestedFlowImport
 from app.rag.document_ingestion import get_document_ingester
 from app.rag.vector_store import get_vector_store
 
+DEMO_PROJECT_NAME = "Enterprise Authentication Portal"
+DEMO_FLOW_VERSION = "phase5-v1"
 
 SIGNIN_FLOW = {
     "root": "Sign In",
-    "description": "User authentication entry point for the platform.",
+    "description": "Enterprise authentication entry for the platform.",
     "branches": [
         {
             "name": "Email + Password",
@@ -31,11 +34,17 @@ SIGNIN_FLOW = {
                 {"name": "Valid Credentials", "type": "UserFlow"},
                 {"name": "Invalid Password", "type": "FailurePath", "is_failure_path": True},
                 {"name": "Forgot Password", "type": "AlternateFlow"},
-                {"name": "MFA", "type": "SubFeature", "is_critical": True},
+                {
+                    "name": "MFA",
+                    "type": "SubFeature",
+                    "is_critical": True,
+                    "criticality": "high",
+                },
                 {
                     "name": "Account Lockout",
                     "type": "FailurePath",
                     "is_failure_path": True,
+                    "is_critical": True,
                     "criticality": "high",
                 },
             ],
@@ -46,7 +55,7 @@ SIGNIN_FLOW = {
             "description": "Social login via Google",
             "children": [
                 {"name": "Consent", "type": "UserFlow"},
-                {"name": "Callback", "type": "UserFlow"},
+                {"name": "Callback", "type": "UserFlow", "is_critical": True, "criticality": "high"},
                 {
                     "name": "Provider Failure",
                     "type": "FailurePath",
@@ -57,12 +66,23 @@ SIGNIN_FLOW = {
             ],
         },
         {
-            "name": "Enterprise SSO",
+            "name": "Microsoft Enterprise SSO",
             "type": "AuthenticationMethod",
-            "description": "Enterprise identity federation",
+            "description": "Enterprise identity federation via Microsoft IdP",
+            "is_critical": True,
+            "criticality": "high",
+            "is_external_dependency": True,
             "children": [
                 {"name": "SAML", "type": "UserFlow"},
                 {"name": "OIDC", "type": "UserFlow"},
+                {
+                    "name": "SSO Timeout",
+                    "type": "FailurePath",
+                    "is_failure_path": True,
+                    "is_external_dependency": True,
+                    "is_critical": True,
+                    "criticality": "high",
+                },
                 {
                     "name": "Identity Provider Failure",
                     "type": "FailurePath",
@@ -84,23 +104,25 @@ SIGNIN_FLOW = {
 }
 
 AUTH_REQUIREMENTS = """
-# Authentication Requirements
+# Authentication Requirements — Enterprise Authentication Portal
 
 ## Sign In
 - Users must authenticate before accessing protected application resources.
-- Supported methods: Email + Password, Google OAuth, Enterprise SSO, Self Registration.
+- Unauthenticated users cannot access protected pages such as Dashboard.
+- Supported methods: Email + Password, Google OAuth, Microsoft Enterprise SSO, Self Registration.
 - MFA is required for privileged roles when using Email + Password.
-- Account lockout triggers after 5 consecutive invalid password attempts.
+- Account locks after repeated failed login attempts (5 consecutive invalid passwords).
 - Forgot Password must send a time-limited reset link (15 minutes).
 
 ## Google OAuth
 - OAuth consent must be explicit.
-- Callback must validate state parameter to prevent CSRF.
+- OAuth callback state must be validated to prevent CSRF.
 - Provider failures must show recoverable error messaging without creating sessions.
 - Session Creation occurs only after successful callback token exchange.
 
-## Enterprise SSO
+## Microsoft Enterprise SSO
 - SAML and OIDC are both supported.
+- SSO timeout must produce an actionable error (never an infinite loading state).
 - Identity Provider Failure must not leak internal errors.
 - Session fixation protections are mandatory after IdP assertion.
 
@@ -109,20 +131,26 @@ AUTH_REQUIREMENTS = """
 - Rate limiting applies to password and MFA attempts.
 """
 
+# Intentionally leave Microsoft Enterprise SSO / SSO Timeout uncovered so the
+# coverage loop can demonstrate Initial → Gaps → Targeted → Final.
 EXISTING_TESTS = [
     {
         "test_case_id": "TC-001",
-        "title": "Successful email/password login",
+        "title": "Successful email login",
         "graph_path": ["Sign In", "Email + Password", "Valid Credentials"],
         "priority": "high",
         "category": "functional",
+        "steps": ["Open Sign In", "Enter valid email/password", "Submit"],
+        "expected_result": "Authenticated session is created and Dashboard is reachable.",
     },
     {
         "test_case_id": "TC-002",
-        "title": "Invalid password rejection",
+        "title": "Invalid password",
         "graph_path": ["Sign In", "Email + Password", "Invalid Password"],
         "priority": "high",
-        "category": "functional",
+        "category": "negative",
+        "steps": ["Open Sign In", "Enter valid email with wrong password", "Submit"],
+        "expected_result": "Login is rejected with a clear error; no session is created.",
     },
     {
         "test_case_id": "TC-003",
@@ -130,80 +158,120 @@ EXISTING_TESTS = [
         "graph_path": ["Sign In", "Google OAuth", "Consent", "Callback", "Session Creation"],
         "priority": "high",
         "category": "functional",
-    },
-    {
-        "test_case_id": "TC-004",
-        "title": "Google OAuth provider failure handling",
-        "graph_path": ["Sign In", "Google OAuth", "Provider Failure"],
-        "priority": "high",
-        "category": "negative",
-    },
-    {
-        "test_case_id": "TC-005",
-        "title": "Self-registration email verification",
-        "graph_path": ["Sign In", "Self Registration", "Email Verification"],
-        "priority": "medium",
-        "category": "functional",
+        "steps": ["Choose Google OAuth", "Approve consent", "Complete callback"],
+        "expected_result": "Session is created only after successful callback token exchange.",
     },
 ]
 
 HISTORICAL_BUGS = [
     {
         "bug_id": "BUG-007",
-        "title": "OAuth callback failure leaves orphan session cookie",
+        "title": "OAuth callback accepted invalid state",
         "severity": "high",
-        "affected_components": ["Google OAuth", "Callback", "Session Creation"],
-        "graph_path": ["Sign In", "Google OAuth", "Callback", "Session Creation"],
+        "affected_components": ["Google OAuth", "Callback"],
+        "graph_path": ["Sign In", "Google OAuth", "Callback"],
     },
     {
         "bug_id": "BUG-012",
-        "title": "Session creation failure after successful IdP assertion",
-        "severity": "high",
-        "affected_components": ["Enterprise SSO", "Session Creation"],
-        "graph_path": ["Sign In", "Enterprise SSO", "OIDC"],
+        "title": "Locked users accessed Dashboard directly",
+        "severity": "critical",
+        "affected_components": ["Account Lockout", "Dashboard"],
+        "graph_path": ["Sign In", "Email + Password", "Account Lockout"],
     },
     {
         "bug_id": "BUG-019",
-        "title": "Repeated MFA attempts bypass rate limit",
-        "severity": "critical",
-        "affected_components": ["MFA", "Email + Password"],
-        "graph_path": ["Sign In", "Email + Password", "MFA"],
-    },
-    {
-        "bug_id": "BUG-021",
-        "title": "Account lockout recovery email not sent",
-        "severity": "medium",
-        "affected_components": ["Account Lockout", "Forgot Password"],
-        "graph_path": ["Sign In", "Email + Password", "Account Lockout"],
+        "title": "SSO timeout caused an infinite loading state",
+        "severity": "high",
+        "affected_components": ["Microsoft Enterprise SSO", "SSO Timeout"],
+        "graph_path": ["Sign In", "Microsoft Enterprise SSO", "SSO Timeout"],
     },
 ]
 
+DEMO_QUERY = (
+    "Analyze the Sign In flow. Generate comprehensive tests focused on security, "
+    "negative scenarios, historical bugs, and uncovered branches. Then identify "
+    "coverage gaps and generate targeted tests for the highest-risk gaps."
+)
+
+SEED_TEST_IDS = {tc["test_case_id"] for tc in EXISTING_TESTS}
+SEED_BUG_IDS = {bug["bug_id"] for bug in HISTORICAL_BUGS}
+
+
+def _flow_fingerprint() -> str:
+    payload = json.dumps(SIGNIN_FLOW, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"{DEMO_FLOW_VERSION}:{payload}".encode("utf-8")).hexdigest()
+
+
+def _find_demo_project(store: Any) -> dict[str, Any] | None:
+    for name in (DEMO_PROJECT_NAME, "Auth Platform Demo"):
+        found = next((p for p in store.list_projects() if p.get("name") == name), None)
+        if found:
+            return found
+    return None
+
 
 def seed_signin_demo(*, force: bool = False) -> dict[str, Any]:
-    store = get_graph_store()
+    """Deterministic, repeatable, idempotent demo seed.
 
-    # Reuse existing demo project if present
-    existing = next(
-        (p for p in store.list_projects() if p.get("name") == "Auth Platform Demo"),
-        None,
-    )
+    Re-running without force:
+    - Reuses the demo project
+    - Skips graph rewrite when the flow fingerprint is unchanged
+    - Upserts fixed-ID tests/bugs (no uncontrolled duplicates)
+    - Document ingest remains content-hash idempotent
+    """
+    store = get_graph_store()
+    fingerprint = _flow_fingerprint()
+    reused_project = False
+    graph_rewritten = False
+
+    existing = _find_demo_project(store)
     if existing and not force:
         project_id = existing["id"]
+        reused_project = True
+        # Normalize legacy demo name
+        if existing.get("name") != DEMO_PROJECT_NAME:
+            existing["name"] = DEMO_PROJECT_NAME
+            existing["description"] = (
+                "Hackathon demo: Enterprise Authentication Portal centered on Sign In."
+            )
+            store.projects[project_id] = existing
     else:
-        project = store.create_project(
-            name="Auth Platform Demo",
-            description="Hackathon demo project centered on Sign In system flow.",
-            root_feature=None,
+        if existing and force:
+            project_id = existing["id"]
+            reused_project = True
+            existing["name"] = DEMO_PROJECT_NAME
+            store.projects[project_id] = existing
+        else:
+            project = store.create_project(
+                name=DEMO_PROJECT_NAME,
+                description=(
+                    "Hackathon demo: Enterprise Authentication Portal centered on Sign In."
+                ),
+                root_feature=None,
+            )
+            project_id = project["id"]
+
+    project = store.projects.get(project_id) or {}
+    meta = dict(project.get("metadata") or {})
+    prior_fp = meta.get("demo_flow_fingerprint")
+    graph = store.get_project_graph(project_id)
+
+    if force or prior_fp != fingerprint or not graph.nodes:
+        ingester = get_flow_ingester()
+        graph = ingester.from_nested_import(
+            project_id,
+            NestedFlowImport.model_validate(SIGNIN_FLOW),
         )
-        project_id = project["id"]
+        graph_rewritten = True
+        meta["demo_flow_fingerprint"] = fingerprint
+        meta["demo_flow_version"] = DEMO_FLOW_VERSION
+        project["metadata"] = meta
+        project["name"] = DEMO_PROJECT_NAME
+        store.projects[project_id] = project
+    else:
+        graph = store.get_project_graph(project_id)
 
-    ingester = get_flow_ingester()
-    graph = ingester.from_nested_import(
-        project_id,
-        NestedFlowImport.model_validate(SIGNIN_FLOW),
-    )
-
-    # Documents + vectors
+    # Documents + vectors (content-hash idempotent)
     doc = get_document_ingester().ingest_text(
         project_id,
         "authentication_requirements.md",
@@ -213,26 +281,52 @@ def seed_signin_demo(*, force: bool = False) -> dict[str, Any]:
     chunks = [c for c in get_document_ingester().get_chunks(project_id) if c.document_id == doc.id]
     indexed = get_vector_store().upsert_chunks(chunks)
 
-    # Existing tests & bugs
+    # Upsert seed tests/bugs by stable IDs — never invent extra seed copies
     for tc in EXISTING_TESTS:
-        payload = {**tc, "project_id": project_id}
+        payload = {**tc, "project_id": project_id, "source": "demo_seed"}
         store.test_cases[tc["test_case_id"]] = payload
     for bug in HISTORICAL_BUGS:
-        payload = {**bug, "project_id": project_id}
+        payload = {**bug, "project_id": project_id, "source": "demo_seed"}
         store.bugs[bug["bug_id"]] = payload
+
+    # Remove legacy seed IDs that are no longer part of the curated set
+    for legacy_id in ("TC-004", "TC-005", "BUG-021"):
+        existing_item = store.test_cases.get(legacy_id) or store.bugs.get(legacy_id)
+        if not existing_item:
+            continue
+        if existing_item.get("project_id") != project_id:
+            continue
+        if legacy_id.startswith("TC-") and legacy_id in store.test_cases:
+            del store.test_cases[legacy_id]
+        if legacy_id.startswith("BUG-") and legacy_id in store.bugs:
+            del store.bugs[legacy_id]
+
     store.persist()
+
+    project_tests = [
+        tc
+        for tc in store.test_cases.values()
+        if tc.get("project_id") == project_id and tc.get("test_case_id") in SEED_TEST_IDS
+    ]
+    project_bugs = [
+        b for b in store.bugs.values() if b.get("project_id") == project_id and b.get("bug_id") in SEED_BUG_IDS
+    ]
 
     return {
         "project_id": project_id,
-        "project_name": "Auth Platform Demo",
+        "project_name": DEMO_PROJECT_NAME,
         "root_feature": "Sign In",
         "nodes": len(graph.nodes),
         "edges": len(graph.edges),
         "document_id": doc.id,
         "indexed_chunks": indexed,
-        "existing_tests": len(EXISTING_TESTS),
-        "historical_bugs": len(HISTORICAL_BUGS),
-        "demo_query": "Generate comprehensive QA coverage for Sign In.",
+        "existing_tests": len(project_tests),
+        "historical_bugs": len(project_bugs),
+        "demo_query": DEMO_QUERY,
+        "reused_project": reused_project,
+        "graph_rewritten": graph_rewritten,
+        "flow_fingerprint": fingerprint,
+        "high_risk_uncovered_hint": "Microsoft Enterprise SSO / SSO Timeout",
     }
 
 

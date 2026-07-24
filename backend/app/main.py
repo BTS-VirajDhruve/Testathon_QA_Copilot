@@ -22,9 +22,24 @@ async def lifespan(_app: FastAPI):
     logger.info(
         "app_starting",
         env=settings.app_env,
-        openai=settings.has_openai,
+        openai_configured=settings.has_openai,
         neo4j=settings.neo4j_enabled,
+        demo_fallback=settings.enable_demo_fallback,
     )
+    try:
+        from app.rag.vector_store import get_vector_store
+        from app.services.openai_service import get_openai_service
+
+        vs = get_vector_store()
+        oa = get_openai_service()
+        logger.info(
+            "runtime_diagnostics",
+            openai_client_ready=oa.available,
+            vector_store_mode=vs.backend_mode,
+            graph_store_mode="neo4j+json" if settings.neo4j_enabled else "json",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("runtime_diagnostics_failed", error=str(exc)[:200])
     yield
     logger.info("app_stopping")
 

@@ -48,6 +48,20 @@ export type AgentTraceStep = {
   step: string;
   status: string;
   detail?: string;
+  timestamp?: string;
+};
+
+export type HealthStatus = {
+  status: string;
+  openai: boolean;
+  openai_configured?: boolean;
+  openai_client_ready?: boolean;
+  openai_model?: string | null;
+  neo4j_enabled?: boolean;
+  demo_fallback?: boolean;
+  vector_store_mode?: string;
+  graph_store_mode?: string;
+  projects?: number;
 };
 
 export type EvidenceReference = {
@@ -162,6 +176,18 @@ export type QACopilotResponse = {
   critic_notes: string[];
   execution_trace: AgentTraceStep[];
   narrative: string;
+  fused_context_summary?: {
+    feature?: string | null;
+    flow_paths?: number;
+    semantic_hits?: number;
+    existing_tests?: number;
+    historical_bugs?: number;
+    initial_tests?: number;
+    targeted_tests?: number;
+    regeneration_rounds?: number;
+    graph_context_items?: number;
+    vector_hits?: number;
+  };
   initial_test_cases?: TestCase[];
   selected_coverage_gaps?: CoverageGap[];
   targeted_test_cases?: TestCase[];
@@ -169,6 +195,9 @@ export type QACopilotResponse = {
   coverage_after?: CoverageSnapshot | null;
   regeneration_rounds?: number;
   unresolved_gaps?: CoverageGap[];
+  duplicates_removed?: number;
+  generation_backend?: string | null;
+  runtime_diagnostics?: Record<string, unknown>;
 };
 
 export type DashboardStats = {
@@ -184,6 +213,7 @@ export type DashboardStats = {
   node_count: number;
   edge_count: number;
   uncovered_branches: string[];
+  calculation_notes?: string[];
 };
 
 export type NodeInsight = {

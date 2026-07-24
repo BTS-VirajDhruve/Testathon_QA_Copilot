@@ -47,13 +47,30 @@ class NodeCreateBody(BaseModel):
 @router.get("/health")
 def health() -> dict[str, Any]:
     from app.core.config import get_settings
+    from app.graph.store import get_graph_store, get_neo4j_store
+    from app.rag.vector_store import get_vector_store
+    from app.services.openai_service import get_openai_service
 
     settings = get_settings()
+    openai = get_openai_service()
+    vectors = get_vector_store()
+    neo4j = get_neo4j_store()
+    graph_mode = (
+        "neo4j+json"
+        if settings.neo4j_enabled and getattr(neo4j, "_driver", None) is not None
+        else "json"
+    )
     return {
         "status": "ok",
         "openai": settings.has_openai,
+        "openai_configured": openai.configured,
+        "openai_client_ready": openai.available,
+        "openai_model": settings.openai_model if settings.has_openai else None,
         "neo4j_enabled": settings.neo4j_enabled,
         "demo_fallback": settings.enable_demo_fallback,
+        "vector_store_mode": vectors.backend_mode,
+        "graph_store_mode": graph_mode,
+        "projects": len(get_graph_store().list_projects()),
     }
 
 
