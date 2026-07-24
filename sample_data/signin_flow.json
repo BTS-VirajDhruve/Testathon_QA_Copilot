@@ -1,0 +1,22 @@
+{
+  "root": "Sign In",
+  "description": "Sample nested import for Sign In",
+  "branches": [
+    {
+      "name": "Email + Password",
+      "children": ["Valid Credentials", "Invalid Password", "Forgot Password", "MFA", "Account Lockout"]
+    },
+    {
+      "name": "Google OAuth",
+      "children": ["Consent", "Callback", "Provider Failure", "Session Creation"]
+    },
+    {
+      "name": "Enterprise SSO",
+      "children": ["SAML", "OIDC", "Identity Provider Failure"]
+    },
+    {
+      "name": "Self Registration",
+      "children": ["Email Verification", "Profile Creation"]
+    }
+  ]
+}

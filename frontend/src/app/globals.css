@@ -1,0 +1,65 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --bg: #eef3f0;
+  --ink: #121a17;
+  --line: rgba(36, 51, 44, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+body {
+  background-image: var(--tw-gradient-stops, none);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(36, 51, 44, 0.25);
+  border-radius: 999px;
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-ink-700/10 bg-white/70 backdrop-blur-sm shadow-soft;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition;
+  }
+  .btn-primary {
+    @apply btn bg-ink-900 text-mist-50 hover:bg-ink-800;
+  }
+  .btn-secondary {
+    @apply btn border border-ink-700/15 bg-white/80 text-ink-900 hover:bg-mist-100;
+  }
+  .btn-brass {
+    @apply btn bg-brass-500 text-white hover:bg-brass-600;
+  }
+  .label {
+    @apply text-[11px] uppercase tracking-[0.16em] text-ink-600/70;
+  }
+}
