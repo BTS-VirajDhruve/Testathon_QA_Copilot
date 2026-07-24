@@ -83,6 +83,18 @@ export function TestCaseEvidenceCard({ tc }: { tc: TestCase }) {
         </div>
       ) : null}
 
+      {tc.closes_gap_title || tc.closes_gap_id ? (
+        <div className="mt-3 rounded-xl border border-pine-700/20 bg-pine-700/5 px-3 py-2">
+          <div className="label">Coverage gap addressed</div>
+          <p className="mt-1 text-sm text-ink-800">
+            {tc.closes_gap_title || tc.closes_gap_id}
+          </p>
+          {tc.closes_gap_id ? (
+            <div className="mt-1 font-mono text-[11px] text-ink-600/60">{tc.closes_gap_id}</div>
+          ) : null}
+        </div>
+      ) : null}
+
       {tc.graph_path?.length ? (
         <div className="mt-3">
           <div className="label">Graph context</div>

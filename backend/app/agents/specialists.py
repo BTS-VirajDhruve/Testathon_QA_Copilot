@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agents.dedup import deduplicate_tests
 from app.agents.evidence import (
     build_evidence_catalog,
     evidence_for_path_bugs_and_requirements,
@@ -17,6 +18,7 @@ from app.graph.traversal import get_coverage_engine, get_traversal
 from app.models.enums import ConfidenceLevel, Priority, RiskLevel
 from app.models.schemas import (
     BugReport,
+    CoverageGap,
     CoverageGapResult,
     EvidenceReference,
     ExploratoryMission,
@@ -116,6 +118,51 @@ Rules:
 11. For evidence: ONLY cite source_id values that appear in the provided context. Never invent IDs.
 12. If exact evidence is unavailable, omit evidence entries or leave source_id null — do not invent sources.
 13. Provide reasoning explaining why the test exists based on retrieved context.
+"""
+
+    TARGETED_SYSTEM_PROMPT = """You are a senior QA automation architect.
+Generate a test case specifically for this coverage gap.
+
+Return JSON only with this shape:
+{
+  "test_cases": [
+    {
+      "title": "string",
+      "category": "functional|security|negative|regression|exploratory",
+      "priority": "critical|high|medium|low",
+      "risk": "critical|high|medium|low",
+      "preconditions": ["string"],
+      "test_data": {},
+      "steps": ["string"],
+      "expected_result": "string",
+      "testing_technique": "string",
+      "graph_path": ["node label", "..."],
+      "graph_reasoning": "string",
+      "reasoning": "This test was generated to close coverage gap: <gap title>. ...",
+      "source_references": ["legacy string labels only when needed"],
+      "evidence": [
+        {
+          "source_type": "graph|requirement|existing_test|historical_bug|risk|coverage_gap",
+          "source_id": "MUST be an ID present in the context, or null",
+          "source_title": "title/label from context",
+          "relevance": "why this source supports the test"
+        }
+      ],
+      "confidence": "high|medium|low",
+      "assumptions": ["string"]
+    }
+  ]
+}
+
+Rules:
+1. Generate ONLY test case(s) that close the provided coverage gap — do NOT regenerate the full suite.
+2. Prefer 1 focused test case; at most 2 if the gap clearly requires positive+negative pairs.
+3. Use the provided graph path, nodes, relationships, requirements, bugs, and evidence catalog.
+4. Do NOT invent unsupported product behavior.
+5. Do NOT duplicate existing tests listed in the context (by title, steps, expected result, or graph path).
+6. For evidence: ONLY cite source_id values from allowed_evidence_catalog. Never invent IDs.
+7. Reasoning MUST explain: This test was generated to close coverage gap: <gap>.
+8. Preserve graph_path traceability using labels from the gap / discovered paths.
 """
 
     def generate(self, query: str, fused: FusedContext, project_id: str) -> list[TestCase]:
@@ -259,6 +306,330 @@ Rules:
             ),
         }
 
+    def build_targeted_context(
+        self,
+        gap: CoverageGap,
+        fused: FusedContext,
+        existing_tests: list[TestCase],
+    ) -> dict[str, Any]:
+        """Narrow fused context for a single coverage gap — for targeted LLM prompts."""
+        base = self.build_llm_context(
+            f"Generate a test case specifically for this coverage gap: {gap.title}",
+            fused,
+        )
+        # Relevant path entries only
+        gap_tokens = {p.lower() for p in gap.graph_path}
+        relevant_paths = []
+        for entry in base.get("discovered_graph_paths") or []:
+            if not isinstance(entry, dict):
+                continue
+            labels = [str(x) for x in (entry.get("node_labels") or entry.get("path_sequence") or [])]
+            if not gap_tokens or gap_tokens.intersection({x.lower() for x in labels}):
+                relevant_paths.append(entry)
+        if not relevant_paths and gap.graph_path:
+            relevant_paths = [
+                {
+                    "node_labels": gap.graph_path,
+                    "node_ids": [],
+                    "path_id": None,
+                    "edge_relationships": [],
+                    "path_sequence": gap.graph_path,
+                    "is_failure_path": gap.gap_type in ("failure", "negative"),
+                    "includes_external_dependency": False,
+                }
+            ]
+
+        # Filter bugs/requirements that touch the gap path or are cited on the gap
+        gap_bug_ids = {
+            e.source_id
+            for e in (gap.evidence or [])
+            if e.source_type == "historical_bug" and e.source_id
+        }
+        relevant_bugs = []
+        for bug in fused.historical_risks:
+            path = [str(p).lower() for p in (bug.get("graph_path") or [])]
+            if gap_bug_ids and bug.get("bug_id") in gap_bug_ids:
+                relevant_bugs.append(bug)
+            elif gap_tokens and gap_tokens.intersection(path):
+                relevant_bugs.append(bug)
+            elif gap.gap_type in ("bug",) or "bug" in str(gap.gap_type):
+                relevant_bugs.append(bug)
+
+        existing_summaries = [
+            {
+                "test_case_id": tc.test_case_id,
+                "title": tc.title,
+                "steps": tc.steps,
+                "expected_result": tc.expected_result,
+                "graph_path": tc.graph_path,
+                "generation_method": tc.generation_method,
+            }
+            for tc in existing_tests
+        ]
+
+        return {
+            "instruction": (
+                "Generate a test case specifically for this coverage gap. "
+                "Do not regenerate the complete test suite."
+            ),
+            "coverage_gap": {
+                "gap_id": gap.gap_id,
+                "gap_type": gap.gap_type.value if hasattr(gap.gap_type, "value") else gap.gap_type,
+                "title": gap.title,
+                "description": gap.description,
+                "priority": gap.priority.value if hasattr(gap.priority, "value") else gap.priority,
+                "risk": gap.risk.value if hasattr(gap.risk, "value") else gap.risk,
+                "graph_path": gap.graph_path,
+                "reason": gap.reason,
+                "evidence": [e.model_dump() for e in (gap.evidence or [])],
+                "source_references": gap.source_references,
+            },
+            "relevant_graph_path": gap.graph_path,
+            "relevant_graph_paths": relevant_paths or "unavailable",
+            "relevant_requirements": base.get("requirements") or "unavailable",
+            "relevant_historical_bugs": relevant_bugs or base.get("historical_bugs") or "unavailable",
+            "existing_tests_do_not_duplicate": existing_summaries or "none",
+            "allowed_evidence_catalog": base.get("allowed_evidence_catalog") or [],
+            "evidence_rules": base.get("evidence_rules"),
+            "target_feature": base.get("target_feature"),
+            "retrieval_sources": base.get("retrieval_sources"),
+        }
+
+    def generate_for_gap(
+        self,
+        gap: CoverageGap,
+        fused: FusedContext,
+        project_id: str,
+        existing_tests: list[TestCase],
+    ) -> list[TestCase]:
+        """Generate only the missing test(s) for one prioritized coverage gap.
+
+        Reuses LLM + Pydantic validation + deterministic fallback + evidence sanitization.
+        Targeted cases are tagged generation_method='critic'.
+        """
+        openai = get_openai_service()
+        cases: list[TestCase] = []
+
+        if openai.available:
+            llm_cases = self._generate_targeted_with_llm(gap, fused, project_id, existing_tests, openai)
+            if llm_cases:
+                cases = llm_cases
+                logger.info("targeted_llm_success", gap_id=gap.gap_id, count=len(cases))
+            else:
+                logger.warning("targeted_llm_failed_using_fallback", gap_id=gap.gap_id)
+                cases = self._generate_targeted_deterministic(gap, fused, project_id, existing_tests)
+        else:
+            cases = self._generate_targeted_deterministic(gap, fused, project_id, existing_tests)
+
+        catalog = build_evidence_catalog(fused)
+        for case in cases:
+            case.generation_method = "critic"
+            case.closes_gap_id = gap.gap_id
+            case.closes_gap_title = gap.title
+            case.project_id = case.project_id or project_id
+            if not case.feature_id:
+                case.feature_id = fused.feature_context.get("id")
+            gap_reason = f"This test was generated to close coverage gap: {gap.title}."
+            if case.reasoning and gap_reason.lower() not in case.reasoning.lower():
+                case.reasoning = f"{gap_reason} {case.reasoning}"
+            elif not case.reasoning:
+                case.reasoning = gap_reason
+            if not case.graph_reasoning:
+                case.graph_reasoning = case.reasoning
+            case.evidence = sanitize_evidence(case.evidence, catalog)
+            # Always retain the coverage_gap evidence anchor
+            if not any(e.source_type == "coverage_gap" for e in case.evidence):
+                case.evidence = [
+                    EvidenceReference(
+                        source_type="coverage_gap",
+                        source_id=gap.gap_id,
+                        source_title=gap.title,
+                        relevance="Targeted regeneration for prioritized coverage gap",
+                    )
+                ] + list(case.evidence)
+            if not case.evidence and case.graph_path:
+                case.evidence = evidence_for_path_bugs_and_requirements(
+                    case.graph_path, fused, catalog
+                )
+            if case.evidence and not case.source_references:
+                case.source_references = legacy_source_strings(case.evidence)
+            elif case.evidence:
+                merged = list(case.source_references) + legacy_source_strings(case.evidence)
+                seen_refs: set[str] = set()
+                unique_refs: list[str] = []
+                for s in merged:
+                    if s not in seen_refs:
+                        seen_refs.add(s)
+                        unique_refs.append(s)
+                case.source_references = unique_refs
+
+        cases = deduplicate_tests(cases, against=existing_tests)
+        # Persist lightly for coverage matching
+        store = get_graph_store()
+        for case in cases:
+            store.test_cases[case.test_case_id] = case.model_dump(mode="json")
+        if cases:
+            store.persist()
+        return cases
+
+    def _generate_targeted_with_llm(
+        self,
+        gap: CoverageGap,
+        fused: FusedContext,
+        project_id: str,
+        existing_tests: list[TestCase],
+        openai: Any,
+    ) -> list[TestCase]:
+        context = self.build_targeted_context(gap, fused, existing_tests)
+        user_prompt = (
+            "Generate a test case specifically for this coverage gap.\n\n"
+            f"{json.dumps(context, indent=2, default=str)}"
+        )
+        last_error: str | None = None
+        for attempt in range(1, self.MAX_LLM_ATTEMPTS + 1):
+            try:
+                repair_hint = ""
+                if attempt > 1:
+                    repair_hint = (
+                        "\n\nPrevious output was invalid or empty. "
+                        "Return a valid JSON object with a non-empty test_cases array "
+                        "matching the required schema exactly. "
+                        "Generate only for the stated coverage gap."
+                    )
+                data = openai.chat_json(
+                    self.TARGETED_SYSTEM_PROMPT,
+                    user_prompt + repair_hint,
+                    temperature=0.2,
+                    strict=True,
+                )
+                cases = self._parse_and_validate_cases(
+                    data,
+                    project_id,
+                    fused,
+                    generation_method="critic",
+                    id_offset=len(existing_tests),
+                )
+                if cases:
+                    # Cap at 2 per gap
+                    return cases[:2]
+                last_error = "empty_or_unusable_test_cases"
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                logger.warning(
+                    "targeted_llm_attempt_failed",
+                    attempt=attempt,
+                    gap_id=gap.gap_id,
+                    error=last_error,
+                )
+        logger.warning(
+            "targeted_llm_exhausted_attempts",
+            gap_id=gap.gap_id,
+            last_error=last_error,
+        )
+        return []
+
+    def _generate_targeted_deterministic(
+        self,
+        gap: CoverageGap,
+        fused: FusedContext,
+        project_id: str,
+        existing_tests: list[TestCase],
+    ) -> list[TestCase]:
+        """Deterministic fallback for a single coverage gap."""
+        path = list(gap.graph_path) or [fused.feature_context.get("name") or "Feature"]
+        path_meta = {
+            tuple(item.get("path") or []): item
+            for item in fused.graph_context
+            if item.get("path")
+        }
+        meta = path_meta.get(tuple(path), {})
+        gap_type = gap.gap_type.value if hasattr(gap.gap_type, "value") else str(gap.gap_type)
+        is_failure = bool(meta.get("is_failure_path")) or gap_type in ("failure", "negative")
+        external = bool(meta.get("includes_external_dependency")) or gap_type == "risk"
+        catalog = build_evidence_catalog(fused)
+
+        if gap_type == "bug":
+            title = f"Regression: {gap.title.split(':', 1)[-1].strip()}"
+            category = "regression"
+            technique = "Historical-bug regression testing"
+        elif gap_type in ("failure", "negative"):
+            title = f"Negative coverage: {' → '.join(path)}"
+            category = "negative"
+            technique = "Negative testing / fault injection"
+            is_failure = True
+        elif gap_type == "requirement":
+            title = f"Requirement coverage: {gap.title.split(':', 1)[-1].strip()[:80]}"
+            category = "functional"
+            technique = "Requirements-based testing"
+        elif gap_type == "alternate":
+            title = f"Alternate flow: {' → '.join(path)}"
+            category = "functional"
+            technique = "Alternate flow / recovery testing"
+        else:
+            title = f"Gap coverage: {' → '.join(path)}"
+            category = "security" if external else "functional"
+            technique = _technique_for_path(path)
+
+        # Avoid colliding with an existing identical title+path by slight rename only when needed
+        existing_titles = {(t.title or "").lower() for t in existing_tests}
+        if title.lower() in existing_titles:
+            title = f"{title} (gap {gap.gap_id[-6:]})"
+
+        evidence = [
+            EvidenceReference(
+                source_type="coverage_gap",
+                source_id=gap.gap_id,
+                source_title=gap.title,
+                relevance="Deterministic targeted regeneration for prioritized coverage gap",
+            )
+        ]
+        # Prefer gap-provided evidence (already sanitized at build time) + path-linked
+        for e in gap.evidence or []:
+            if e.source_type == "coverage_gap":
+                continue
+            evidence.append(e)
+        evidence.extend(evidence_for_path_bugs_and_requirements(path, fused, catalog)[:4])
+        evidence = sanitize_evidence(evidence, catalog) or evidence[:1]
+
+        reasoning = (
+            f"This test was generated to close coverage gap: {gap.title}. "
+            f"{gap.reason or gap.description}"
+        )
+        priority = gap.priority if isinstance(gap.priority, Priority) else Priority.HIGH
+        risk = gap.risk if isinstance(gap.risk, RiskLevel) else RiskLevel.HIGH
+
+        case = TestCase(
+            test_case_id=f"TC-{len(existing_tests) + 1:03d}",
+            title=title,
+            category=category,
+            priority=priority,
+            risk=risk,
+            preconditions=[
+                f"Coverage gap in scope: {gap.title}",
+                f"Graph path under test: {' → '.join(path)}",
+            ],
+            test_data=self._test_data(path, is_failure),
+            steps=self._steps(path, is_failure),
+            expected_result=self._expected(path, is_failure),
+            testing_technique=technique,
+            graph_path=path,
+            graph_reasoning=reasoning,
+            reasoning=reasoning,
+            source_references=legacy_source_strings(evidence),
+            evidence=evidence,
+            confidence=ConfidenceLevel.MEDIUM,
+            assumptions=[
+                "Gap derived deterministically from CoverageEngine + fused context.",
+                "Targeted regeneration does not claim the full suite is complete.",
+            ],
+            project_id=project_id,
+            feature_id=fused.feature_context.get("id"),
+            generation_method="critic",
+            closes_gap_id=gap.gap_id,
+            closes_gap_title=gap.title,
+        )
+        return deduplicate_tests([case], against=existing_tests)
+
     def _generate_with_llm(
         self,
         query: str,
@@ -309,6 +680,9 @@ Rules:
         data: dict[str, Any],
         project_id: str,
         fused: FusedContext,
+        *,
+        generation_method: str = "llm",
+        id_offset: int = 0,
     ) -> list[TestCase]:
         if not isinstance(data, dict):
             return []
@@ -325,10 +699,10 @@ Rules:
                 continue
             try:
                 payload = dict(raw)
-                payload.setdefault("test_case_id", f"TC-{idx:03d}")
+                payload.setdefault("test_case_id", f"TC-{id_offset + idx:03d}")
                 payload.setdefault("project_id", project_id)
                 payload.setdefault("feature_id", feature_id)
-                payload.setdefault("generation_method", "llm")
+                payload.setdefault("generation_method", generation_method)
                 # Normalize enums that may arrive as unexpected casing
                 if "priority" in payload and isinstance(payload["priority"], str):
                     payload["priority"] = payload["priority"].lower()
@@ -367,8 +741,8 @@ Rules:
 
                 case = TestCase.model_validate(payload)
                 # Re-number for stable baseline-compatible IDs
-                case.test_case_id = f"TC-{len(valid) + 1:03d}"
-                case.generation_method = "llm"
+                case.test_case_id = f"TC-{id_offset + len(valid) + 1:03d}"
+                case.generation_method = generation_method
                 case.evidence = sanitized
                 if not case.reasoning:
                     case.reasoning = case.graph_reasoning or None
@@ -677,7 +1051,18 @@ class CriticAgent:
         test_cases: list[TestCase],
         coverage: CoverageGapResult | None,
         fused: FusedContext,
+        add_gap_tests: bool = True,
+        project_id: str | None = None,
     ) -> tuple[list[str], list[TestCase]]:
+        """Review generated tests for path completeness and coverage gaps.
+
+        When add_gap_tests=True (default for standalone/compat use), appends
+        critic-targeted tests for recommended coverage gaps via TestCaseAgent
+        generate_for_gap (LLM-first with deterministic fallback).
+
+        The orchestrator Phase-4 loop typically calls with add_gap_tests=False and
+        runs bounded prioritized regeneration separately.
+        """
         notes: list[str] = []
         improved = list(test_cases)
 
@@ -690,59 +1075,37 @@ class CriticAgent:
         if coverage:
             for gap in coverage.critical_gaps[:6]:
                 notes.append(f"Critical gap remains: {gap}")
-            # Auto-add recommended gap tests if not present
-            for rec in coverage.recommended_tests[:4]:
-                if not any(rec.lower() in tc.title.lower() for tc in improved):
-                    # Prefer an uncovered branch path when available
-                    gap_path = [coverage.root_feature]
-                    for branch in coverage.uncovered_branches:
-                        if branch.lower() in rec.lower():
-                            gap_path = [coverage.root_feature, branch]
-                            break
-                    reasoning = (
-                        f"Critic added this test to address coverage gap: {rec}. "
-                        f"Critical gaps considered: {', '.join(coverage.critical_gaps[:3]) or 'n/a'}."
-                    )
-                    evidence = [
-                        EvidenceReference(
-                            source_type="coverage_gap",
-                            source_id=None,
-                            source_title=rec,
-                            relevance="Coverage engine recommended this gap-driven test",
-                        )
-                    ]
-                    # Attach real graph feature evidence when present
-                    catalog = build_evidence_catalog(fused)
-                    evidence.extend(
-                        evidence_for_path_bugs_and_requirements(gap_path, fused, catalog)[:4]
-                    )
-                    improved.append(
-                        TestCase(
-                            test_case_id=f"TC-{len(improved)+1:03d}",
-                            title=rec,
-                            category="functional",
-                            priority=Priority.HIGH,
-                            risk=RiskLevel.HIGH,
-                            steps=[
-                                "Design and execute coverage for the identified uncovered graph branch/path."
-                            ],
-                            expected_result="Uncovered graph area gains explicit test evidence.",
-                            testing_technique="Coverage-gap driven testing",
-                            graph_path=gap_path,
-                            graph_reasoning=reasoning,
-                            reasoning=reasoning,
-                            source_references=legacy_source_strings(evidence),
-                            evidence=evidence,
-                            confidence=ConfidenceLevel.MEDIUM,
-                            assumptions=[
-                                "Gap derived from comparing graph nodes to existing test path tokens."
-                            ],
-                            generation_method="critic",
-                        )
-                    )
-                    notes.append(f"Critic added coverage-driven test: {rec}")
 
-        # Ensure every test has graph_path + generation_method where possible
+            if add_gap_tests:
+                from app.agents.coverage_gaps import (
+                    build_coverage_gaps,
+                    select_gaps_for_regeneration,
+                )
+
+                structured = build_coverage_gaps(
+                    coverage=coverage, fused=fused, test_cases=improved
+                )
+                selected = select_gaps_for_regeneration(structured, max_gaps=4)
+                if selected:
+                    agent = TestCaseAgent()
+                    pid = project_id or fused.feature_context.get("project_id") or "project"
+                    for gap in selected:
+                        added = agent.generate_for_gap(gap, fused, pid, improved)
+                        if added:
+                            improved.extend(added)
+                            notes.append(
+                                f"Critic added coverage-driven test for gap: {gap.title}"
+                            )
+                        else:
+                            notes.append(
+                                f"Critic skipped duplicate/empty generation for gap: {gap.title}"
+                            )
+                elif coverage.recommended_tests:
+                    notes.append(
+                        "Coverage recommendations present but no high-priority gaps selected."
+                    )
+
+        # Ensure every test has graph_path + reasoning where possible
         for tc in improved:
             if not tc.graph_path and fused.feature_context.get("name"):
                 tc.graph_path = [fused.feature_context["name"]]
@@ -750,7 +1113,6 @@ class CriticAgent:
             if not tc.reasoning and tc.graph_reasoning:
                 tc.reasoning = tc.graph_reasoning
             if not tc.generation_method:
-                # Preserve llm/fallback if already set; leave unknown as None only for legacy
                 pass
 
         openai = get_openai_service()
@@ -767,7 +1129,9 @@ class CriticAgent:
                 logger.warning("critic_llm_failed", error=str(exc))
 
         if not notes:
-            notes.append("Critic review complete — path linkage and gap checks passed with no blocking issues.")
+            notes.append(
+                "Critic review complete — path linkage and gap checks passed with no blocking issues."
+            )
         return notes, improved
 
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import type { QACopilotResponse } from "@/lib/types";
 import { TestCaseEvidenceCard } from "@/components/TestCaseEvidenceCard";
+import { RegenerationLoopPanel } from "@/components/RegenerationLoopPanel";
 
 const SUGGESTIONS = [
   "Generate comprehensive QA coverage for Sign In.",
@@ -114,6 +115,12 @@ export function CopilotPanel({
           </div>
         )}
       </div>
+
+      {result && (result.coverage_before || result.targeted_test_cases?.length || result.selected_coverage_gaps?.length) ? (
+        <div className="col-span-full">
+          <RegenerationLoopPanel result={result} />
+        </div>
+      ) : null}
 
       {result && (
         <div className="panel col-span-full p-6">
