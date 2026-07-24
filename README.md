@@ -150,6 +150,8 @@ Neo4j is optional (`NEO4J_ENABLED=false` by default). The primary graph store is
 
 ## Demo workflow
 
+Full live pitch sequence (3–5 min): **[docs/HACKATHON_DEMO_RUNBOOK.md](docs/HACKATHON_DEMO_RUNBOOK.md)**.
+
 1. Click **Load Demo Project** (Enterprise Authentication Portal / Sign In).
 2. Inspect **System Flow** — Email + Password, Google OAuth, Microsoft Enterprise SSO, Self Registration.
 3. Open **Knowledge Base** — requirements are already seeded (optional: add more notes).

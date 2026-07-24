@@ -272,8 +272,8 @@ export default function HomePage() {
                 {selectedProject ? (
                   <span className="rounded-full bg-mist-100 px-3 py-1.5 text-xs text-ink-700">
                     Loaded: <strong className="text-ink-900">{selectedProject.name}</strong>
-                    {selectedProject.root_feature_id || graph?.nodes.find((n) => n.id === graph.root_node_id)?.name
-                      ? ` · ${graph?.nodes.find((n) => n.id === graph.root_node_id)?.name || "Sign In"}`
+                    {graph?.nodes.find((n) => n.id === graph.root_node_id)?.name
+                      ? ` · ${graph.nodes.find((n) => n.id === graph.root_node_id)?.name}`
                       : ""}
                   </span>
                 ) : (
