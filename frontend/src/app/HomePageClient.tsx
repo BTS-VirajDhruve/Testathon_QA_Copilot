@@ -262,15 +262,15 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
     try {
       const h = await api.health();
       setHealth(h);
-      const list = await refreshProjects();
+      await refreshProjects();
       setStatus(
         h.openai_client_ready
           ? "Connected · OpenAI ready"
           : "Connected · Deterministic fallback"
       );
-      if (list[0] && !projectIdRef.current) {
-        await selectProject(list[0].id);
-      } else if (projectIdRef.current) {
+      // Stay on "Select project" until the user chooses one. Only reload if a
+      // project is already selected (e.g. reconnect / create / explicit change).
+      if (projectIdRef.current) {
         await selectProject(projectIdRef.current);
       }
     } catch (err) {
@@ -337,12 +337,14 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
       const list = await refreshProjects();
       if (wasSelected) {
         const nextId = list.find((p) => p.id !== id)?.id || "";
-        await selectProject(nextId);
         setStatus(
           nextId
             ? `Deleted ${name} · switched project`
             : `Deleted ${name} · no projects left`
         );
+        // Return from delete before heavy project reload so the confirm dialog
+        // can close; selectProject still drives projectLoading in the shell.
+        void selectProject(nextId);
       } else {
         setStatus(`Deleted ${name}`);
       }
@@ -704,10 +706,13 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
           {!projectId && !booting && (
             <div className="panel px-6 py-10 text-center">
               <LayoutDashboard className="mx-auto h-8 w-8 text-brass-500" />
-              <h2 className="mt-3 font-display text-2xl">Create a project to begin</h2>
+              <h2 className="mt-3 font-display text-2xl">
+                {projects.length > 0 ? "Select a project to begin" : "Create a project to begin"}
+              </h2>
               <p className="mx-auto mt-2 max-w-lg text-sm text-ink-700/75">
-                Start with an empty project, define a system flow, add knowledge, then run QA Copilot
-                and review unified Analysis Results.
+                {projects.length > 0
+                  ? "Choose a project from the top bar, or create a new one to define a system flow, add knowledge, and run QA Copilot."
+                  : "Start with an empty project, define a system flow, add knowledge, then run QA Copilot and review unified Analysis Results."}
               </p>
               <div className="mt-5 flex justify-center gap-3">
                 <button className="btn-primary" onClick={handleCreateProject} disabled={busy}>

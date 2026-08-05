@@ -69,7 +69,7 @@ Never put `OPENAI_API_KEY` or Atlassian client secrets in frontend env files —
 ```bash
 cd backend
 uv sync --extra dev
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --reload-exclude data --reload-exclude "*.tmp" --host 0.0.0.0 --port 8000
 ```
 
 Or use the Makefile:
@@ -115,7 +115,7 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --reload-exclude data --reload-exclude "*.tmp" --port 8000
 ```
 
 ---

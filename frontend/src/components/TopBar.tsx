@@ -42,11 +42,15 @@ export function TopBar({
   }, [menuOpen]);
 
   async function confirmDelete() {
-    if (!selected) return;
+    if (!selected || deleting) return;
+    const targetId = selected.id;
     setDeleting(true);
     try {
-      await onDeleteProject(selected.id);
+      await onDeleteProject(targetId);
       setConfirmOpen(false);
+      setMenuOpen(false);
+    } catch {
+      // Parent surfaces the error status; keep dialog open for retry/cancel.
     } finally {
       setDeleting(false);
     }

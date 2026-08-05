@@ -290,8 +290,13 @@ class InMemoryGraphStore:
                 "external_knowledge_sources": self.external_knowledge_sources,
             }
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            # Compact JSON — analyses can be multi‑MB; indent=2 made deletes rewrite ~30MB+
+            # and (with --reload) triggered uvicorn restarts mid-request.
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
             tmp.replace(self.path)
 
     def upsert_node(self, node: GraphNode) -> GraphNode:

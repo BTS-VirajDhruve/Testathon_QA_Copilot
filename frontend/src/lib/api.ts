@@ -11,17 +11,26 @@ import type {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number }
+): Promise<T> {
   const controller = new AbortController();
-  const timeoutMs = 120_000;
+  const timeoutMs = init?.timeoutMs ?? 120_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const { timeoutMs: _timeoutMs, signal: userSignal, ...rest } = init || {};
+  const onUserAbort = () => controller.abort();
+  if (userSignal) {
+    if (userSignal.aborted) controller.abort();
+    else userSignal.addEventListener("abort", onUserAbort, { once: true });
+  }
   try {
     const res = await fetch(`${API_URL}${path}`, {
-      ...init,
-      signal: init?.signal || controller.signal,
+      ...rest,
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        ...(init?.headers || {}),
+        ...(rest.headers || {}),
       },
       cache: "no-store",
     });
@@ -37,6 +46,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw err;
   } finally {
     clearTimeout(timer);
+    userSignal?.removeEventListener("abort", onUserAbort);
   }
 }
 
@@ -58,7 +68,7 @@ export const api = {
         bugs: number;
         coverage: number;
       };
-    }>(`/api/projects/${id}`, { method: "DELETE" }),
+    }>(`/api/projects/${id}`, { method: "DELETE", timeoutMs: 45_000 }),
   getProject: (id: string) => request<Project>(`/api/projects/${id}`),
   getFlow: (id: string) => request<SystemFlowGraph>(`/api/projects/${id}/flow`),
   saveFlow: (id: string, graph: SystemFlowGraph) =>
