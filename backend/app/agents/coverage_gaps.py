@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agents.dedup import dedupe_strings
 from app.agents.evidence import (
     build_evidence_catalog,
     evidence_for_path_bugs_and_requirements,
@@ -484,10 +485,12 @@ def build_coverage_snapshot(
         overall_coverage=overall,
         branch_coverage=branch,
         gaps=structured,
-        critical_gaps=list(coverage.critical_gaps) if coverage else [
-            g.title for g in structured if _as_priority(g.priority) in REGENERATION_PRIORITIES
-        ][:12],
-        uncovered_branches=list(coverage.uncovered_branches) if coverage else [],
+        critical_gaps=dedupe_strings(
+            list(coverage.critical_gaps) if coverage else [
+                g.title for g in structured if _as_priority(g.priority) in REGENERATION_PRIORITIES
+            ][:12]
+        ),
+        uncovered_branches=dedupe_strings(list(coverage.uncovered_branches) if coverage else []),
         calculation_notes=notes,
     )
 

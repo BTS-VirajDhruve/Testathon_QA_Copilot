@@ -56,8 +56,9 @@ Without an OpenAI key the API runs in **deterministic demo fallback mode** so th
 | `GRAPH_STORE_PATH` | backend | Durable JSON graph path |
 | `CHROMA_DIR` / `DATA_DIR` | backend | Vector / app data directories |
 | `NEXT_PUBLIC_API_URL` | frontend | API base URL (default `http://localhost:8000`) |
+| `ATLASSIAN_*` | backend | Optional Jira/Confluence OAuth connector (see [docs/ATLASSIAN_CONNECTOR.md](docs/ATLASSIAN_CONNECTOR.md)) |
 
-Never put `OPENAI_API_KEY` in frontend env files — it must stay server-side only.
+Never put `OPENAI_API_KEY` or Atlassian client secrets in frontend env files — they must stay server-side only.
 
 ---
 
@@ -202,10 +203,31 @@ USER QUERY
 
 | Path | Role |
 |------|------|
-| System Flow Builder | React Flow visual editor, JSON import, NL→graph, undo/redo |
+| System Flow | React Flow visual editor, JSON import, NL→graph, undo/redo |
 | Graph Explorer | Node insight: deps, flows, tests, bugs, risk, coverage |
-| QA Copilot | Agentic query console + narrative output |
-| Coverage / Trace / Evidence | Gap analysis, orchestrator steps, provenance |
+| Knowledge Base | Document ingest for Vector RAG |
+| QA Copilot | Agentic query console + readiness + progress |
+| Analysis Results | Unified outputs (tests, automation, bugs, coverage, evidence) + **Export BDD** |
+| Agent Trace | Orchestrator step observability |
+
+### Cucumber BDD export
+
+From **Analysis Results**, use **Export BDD** (header and Tests toolbar share one handler).
+
+- **Default scope:** All Final Generated Tests (initial + targeted; one scenario per logical test)
+- **Options:** Valid Only / Current Filtered; traceability comments; tags; form import CSV (default); strict validation
+- **Standard mode:** deterministic Standard→BDD conversion, then structural Gherkin validation
+- **BDD / Both modes:** reuse persisted BDD representations (no double counting)
+- **Default output:** `*-test-cases.csv` for New Test Case forms with Journey Editor fields:
+  `feature_name`, `feature_description` (As a / I want / So that), `section` (FUNCTIONAL|NEGATIVE),
+  `scenario_name`, `scenario_type`, `tags` (`priority-*;regression;automation-*`), `steps` (`Keyword|text`),
+  `priority`, `automation`
+- **Gherkin output:** uncheck Form import CSV → `.feature` (or ZIP of features when multiple)
+- **Generation default:** BDD / Gherkin mode (Copilot format toggle) with `@priority-* @regression @automation-*` tags and `# FUNCTIONAL` / `# NEGATIVE` sections
+- **Compliance:** one `Feature` per file; Given/When/Then; optional Background/Outline; UTF-8; two-space indent
+- **Not included:** Cucumber step definitions or browser automation glue code
+
+Strict export fails with typed `BDD_CONVERSION_FAILED` (lists affected test IDs) instead of silently dropping tests. Use **Export Valid Tests Only** as fallback.
 
 ---
 
@@ -218,9 +240,13 @@ USER QUERY
 - `POST /api/projects/{id}/flow/from-text` — natural language → graph
 - `POST /api/projects/{id}/documents/text` — ingest + embed
 - `POST /api/copilot/query` — full agentic QA run
+- `POST /api/copilot/query/stream` — SSE progress + complete analysis
 - `GET /api/projects/{id}/coverage` — explained graph coverage
 - `GET /api/projects/{id}/impact?node=Google%20OAuth`
-- `POST /api/demo/seed` — Sign In demo dataset
+- `GET /api/projects/{id}/tests/export.feature` — legacy BDD dump (pre-built scenarios only)
+- `POST /api/projects/{id}/analyses/latest/exports/bdd` — CSV by default (form import); Gherkin when CSV disabled
+- `POST /api/projects/{id}/analyses/latest/exports/bdd/preview` — Gherkin + CSV preview + manifest
+- `POST /api/demo/seed` — Sign In demo dataset (API only; not exposed in UI)
 
 ---
 
@@ -258,13 +284,32 @@ Color system: deep ink greens, mist surfaces, brass accents (not purple-gradient
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `OPENAI_API_KEY` | backend | LLM + embeddings (optional; never commit real keys) |
-| `OPENAI_MODEL` | backend | Chat model (default `gpt-4o-mini`) |
-| `OPENAI_EMBEDDING_MODEL` | backend | Embeddings model |
+| `OPENAI_MODEL` | backend | Global default chat model + final fallback (default `gpt-4o-mini`) |
+| `OPENAI_EMBEDDING_MODEL` | backend | Embeddings model (not routed with chat tasks) |
+| `OPENAI_MODEL_*` | backend | Optional per-task chat model overrides (see `.env.example`) |
+| `MODEL_ROUTING_ENABLED` | backend | Task-aware chat routing (`true` by default) |
+| `MODEL_ESCALATION_ENABLED` | backend | Escalate complex test generation to a stronger model |
+| `MODEL_REVIEWER_ENABLED` | backend | Optional expensive reviewer pass (`false` by default) |
+| `MODEL_ROUTING_ENABLED_TASKS` | backend | Allowlist of task types, or `*` / `all` |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | backend | Optional Neo4j connection |
 | `NEO4J_ENABLED` | backend | Optional Neo4j sync (`false` by default) |
 | `ENABLE_DEMO_FALLBACK` | backend | Deterministic offline mode when OpenAI is missing/fails |
 | `DATA_DIR` / `CHROMA_DIR` / `GRAPH_STORE_PATH` | backend | Persistence paths (relative to `backend/`) |
 | `CORS_ORIGINS` | backend | Allowed frontend origins |
 | `NEXT_PUBLIC_API_URL` | frontend | API base URL (default `http://localhost:8000`) |
+
+### Model routing
+
+Chat calls go through a centralized `ModelRouter` (`backend/app/services/model_router.py`). Agents pass an `LLMTaskType` (and optional routing context); they do **not** hardcode model IDs.
+
+**Resolution order:** task-specific env override → built-in task map → `OPENAI_MODEL` → deterministic fallback (when enabled).
+
+**Escalation (test-case generation):** when deterministic complexity is `high` (or configured security/release/financial/validation signals fire), the router may escalate to `OPENAI_MODEL_ESCALATION_TARGET` / reviewer model. Escalation reason is recorded in `model_routing` and the agent trace.
+
+**Reviewer pass:** separate from the normal Critic Agent. Disabled by default (`MODEL_REVIEWER_ENABLED=false`). When enabled, it runs at most once for high-risk or quality-failure cases.
+
+**Unavailable models:** if the provider rejects a selected model, the service retries the configured global fallback and records `actual_model_used` honestly (never claims the unavailable model succeeded).
+
+Inspect routing in the UI under **Latest analysis → Runtime / Model Routing**, and in API field `model_routing` / `runtime_diagnostics.model_routing`.
 
 Never hardcode API keys. Never put `OPENAI_API_KEY` in frontend env files.

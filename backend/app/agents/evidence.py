@@ -59,16 +59,41 @@ def build_evidence_catalog(fused: FusedContext) -> list[EvidenceReference]:
 
     for hit in fused.semantic_context:
         meta = hit.get("metadata") or {}
-        catalog.append(
-            EvidenceReference(
-                source_type="requirement",
-                source_id=hit.get("id") or meta.get("document_id"),
-                source_title=hit.get("source_reference")
-                or meta.get("filename")
-                or meta.get("source_reference"),
-                relevance="Vector RAG requirement/document chunk",
-            )
+        source_type = (
+            hit.get("source_type")
+            or meta.get("source_type")
+            or "requirement"
         )
+        if source_type in {"jira_issue", "confluence_page"} or meta.get("provider") == "atlassian":
+            source_type = meta.get("source_type") or source_type
+            catalog.append(
+                EvidenceReference(
+                    source_type=source_type if source_type in {"jira_issue", "confluence_page"} else "requirement",
+                    source_id=hit.get("id")
+                    or meta.get("external_id")
+                    or meta.get("document_id"),
+                    source_title=meta.get("title")
+                    or hit.get("source_reference")
+                    or meta.get("external_key")
+                    or meta.get("filename"),
+                    relevance=(
+                        f"Atlassian {source_type.replace('_', ' ')} via Vector RAG"
+                        if meta.get("provider") == "atlassian"
+                        else "Vector RAG requirement/document chunk"
+                    ),
+                )
+            )
+        else:
+            catalog.append(
+                EvidenceReference(
+                    source_type="requirement",
+                    source_id=hit.get("id") or meta.get("document_id"),
+                    source_title=hit.get("source_reference")
+                    or meta.get("filename")
+                    or meta.get("source_reference"),
+                    relevance="Vector RAG requirement/document chunk",
+                )
+            )
 
     for tc in fused.existing_coverage:
         catalog.append(

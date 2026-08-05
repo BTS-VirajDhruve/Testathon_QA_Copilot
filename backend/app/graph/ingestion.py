@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from app.core.logging import get_logger
+from app.graph.node_typing import infer_node_type, rel_for_child
 from app.graph.store import get_graph_store, get_neo4j_store
-from app.models.enums import NodeType, Priority, RelationshipType, SourceType
+from app.models.enums import NodeType, Priority, SourceType
 from app.models.schemas import (
     GraphEdge,
     GraphNode,
@@ -20,69 +21,10 @@ from app.services.openai_service import get_openai_service
 
 logger = get_logger(__name__)
 
-TYPE_HINTS: dict[str, NodeType] = {
-    "email": NodeType.AUTHENTICATION_METHOD,
-    "password": NodeType.AUTHENTICATION_METHOD,
-    "oauth": NodeType.AUTHENTICATION_METHOD,
-    "google": NodeType.AUTHENTICATION_METHOD,
-    "sso": NodeType.AUTHENTICATION_METHOD,
-    "saml": NodeType.AUTHENTICATION_METHOD,
-    "oidc": NodeType.AUTHENTICATION_METHOD,
-    "mfa": NodeType.SUB_FEATURE,
-    "forgot": NodeType.ALTERNATE_FLOW,
-    "lockout": NodeType.FAILURE_PATH,
-    "failure": NodeType.FAILURE_PATH,
-    "callback": NodeType.USER_FLOW,
-    "consent": NodeType.USER_FLOW,
-    "session": NodeType.STATE,
-    "provider": NodeType.THIRD_PARTY_PROVIDER,
-    "api": NodeType.API,
-    "database": NodeType.DATABASE,
-    "db": NodeType.DATABASE,
-    "service": NodeType.SERVICE,
-    "validation": NodeType.VALIDATION,
-    "rule": NodeType.BUSINESS_RULE,
-}
+# Re-export for backward compatibility with imports of TYPE_HINTS / infer_node_type
+from app.graph.node_typing import TYPE_HINTS  # noqa: E402,F401
 
-
-def infer_node_type(name: str, explicit: NodeType | None = None, *, is_failure: bool = False) -> NodeType:
-    if explicit:
-        return explicit
-    if is_failure:
-        return NodeType.FAILURE_PATH
-    lower = name.lower()
-    for needle, ntype in TYPE_HINTS.items():
-        if needle in lower:
-            return ntype
-    return NodeType.SUB_FEATURE
-
-
-def _rel_for_child(parent: GraphNode, child: GraphNode) -> RelationshipType:
-    if child.type == NodeType.AUTHENTICATION_METHOD:
-        return RelationshipType.HAS_AUTHENTICATION_METHOD
-    if child.type == NodeType.FAILURE_PATH or child.is_failure_path:
-        return RelationshipType.HAS_FAILURE_PATH
-    if child.type == NodeType.ALTERNATE_FLOW:
-        return RelationshipType.HAS_ALTERNATE_FLOW
-    if child.type == NodeType.SUB_FEATURE:
-        return RelationshipType.HAS_SUBFEATURE
-    if child.type == NodeType.USER_FLOW:
-        return RelationshipType.HAS_FLOW
-    if child.type == NodeType.STATE:
-        return RelationshipType.HAS_STATE
-    if child.type == NodeType.BUSINESS_RULE:
-        return RelationshipType.HAS_BUSINESS_RULE
-    if child.type == NodeType.VALIDATION:
-        return RelationshipType.HAS_VALIDATION
-    if child.type in (NodeType.EXTERNAL_DEPENDENCY, NodeType.THIRD_PARTY_PROVIDER):
-        return RelationshipType.DEPENDS_ON
-    if child.type == NodeType.COMPONENT:
-        return RelationshipType.IMPLEMENTED_BY
-    if child.type == NodeType.SERVICE:
-        return RelationshipType.CALLS
-    if child.type == NodeType.API:
-        return RelationshipType.EXPOSES
-    return RelationshipType.HAS_CHILD
+ProgressCallback = Callable[[str, str, dict[str, Any]], None]
 
 
 class FlowGraphIngester:
@@ -152,7 +94,7 @@ class FlowGraphIngester:
                 GraphEdge(
                     source=parent.id,
                     target=child.id,
-                    relationship=_rel_for_child(parent, child),
+                    relationship=rel_for_child(parent, child),
                     provenance=child.provenance,
                 )
             )
@@ -170,29 +112,80 @@ class FlowGraphIngester:
         )
         return self.persist(graph)
 
-    def from_natural_language(self, project_id: str, text: str) -> SystemFlowGraph:
-        system = (
-            "You extract software system flow graphs for QA. "
-            "Return JSON with keys: root, description, branches. "
-            "Each branch: name, type (optional), is_failure_path, children[], inferred. "
-            "Do NOT invent unsupported system behavior. Mark inferred=true when guessing."
+    def from_natural_language(
+        self,
+        project_id: str,
+        text: str,
+        *,
+        on_progress: ProgressCallback | None = None,
+    ) -> SystemFlowGraph:
+        """
+        Deterministic NL → Intermediate Tree → NestedFlowImport → canonical graph.
+
+        LLM is used only for low-confidence node type classification (never for JSON).
+        """
+        from app.graph.nl.builder import validate_and_repair_graph
+        from app.graph.nl.pipeline import ProgressEvent, run_nl_to_nested_import
+
+        def _bridge(event: ProgressEvent) -> None:
+            if on_progress:
+                on_progress(event.stage, event.message, event.meta)
+
+        result = run_nl_to_nested_import(
+            text,
+            project_id=project_id,
+            on_progress=_bridge if on_progress else None,
         )
-        user = f"Extract a system flow graph from this description:\n\n{text}"
-        data = self.openai.chat_json(system, user)
-        inferred = bool(data.get("inferred", True))
-        confidence = float(data.get("confidence", 0.6))
-        payload = {
-            "root": data.get("root") or "Feature",
-            "description": data.get("description") or text[:240],
-            "branches": data.get("branches") or [],
-        }
-        return self.from_nested_import(
+
+        if on_progress:
+            on_progress("generating", "Persisting graph...", result.stats)
+
+        graph = self.from_nested_import(
             project_id,
-            payload,
-            source_type=SourceType.LLM_INFERENCE if inferred else SourceType.USER_INPUT,
-            inferred=inferred,
-            confidence=confidence,
+            result.nested,
+            source_type=SourceType.LLM_INFERENCE if result.inferred else SourceType.USER_INPUT,
+            inferred=result.inferred,
+            confidence=result.confidence,
         )
+
+        graph, repairs = validate_and_repair_graph(graph)
+        if repairs:
+            logger.info("nl_graph_repairs", project_id=project_id, repairs=repairs)
+            graph = self.persist(graph)
+
+        if on_progress:
+            on_progress(
+                "rendering",
+                "Rendering graph...",
+                {
+                    "nodes": len(graph.nodes),
+                    "edges": len(graph.edges),
+                    "llm_calls": result.stats.get("llm_calls", 0),
+                    "repairs": repairs,
+                },
+            )
+
+        logger.info(
+            "nl_graph_built",
+            project_id=project_id,
+            nodes=len(graph.nodes),
+            edges=len(graph.edges),
+            llm_calls=result.stats.get("llm_calls", 0),
+            parser=result.stats.get("parser", {}).get("parser"),
+        )
+        # Attach pipeline stats on root metadata for diagnostics (non-breaking)
+        if graph.nodes:
+            root = next((n for n in graph.nodes if n.id == graph.root_node_id), graph.nodes[0])
+            root.metadata = {
+                **dict(root.metadata or {}),
+                "nl_pipeline_stats": {
+                    "llm_calls": result.stats.get("llm_calls", 0),
+                    "classification": result.stats.get("classification"),
+                    "parser": result.stats.get("parser", {}).get("parser"),
+                },
+            }
+            self.store.upsert_node(root)
+        return graph
 
     def persist(self, graph: SystemFlowGraph) -> SystemFlowGraph:
         saved = self.store.save_project_graph(graph)

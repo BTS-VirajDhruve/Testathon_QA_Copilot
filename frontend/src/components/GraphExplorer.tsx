@@ -25,8 +25,24 @@ function ExplorerInner({
   const [insight, setInsight] = useState<NodeInsight | null>(null);
 
   useEffect(() => {
+    setSelectedId(graph.root_node_id || graph.nodes[0]?.id || "");
+    setInsight(null);
+  }, [graph.project_id, graph.root_node_id, graph.version]);
+
+  useEffect(() => {
     if (!selectedId) return;
-    api.nodeInsight(projectId, selectedId).then(setInsight).catch(() => setInsight(null));
+    let cancelled = false;
+    api
+      .nodeInsight(projectId, selectedId)
+      .then((data) => {
+        if (!cancelled) setInsight(data);
+      })
+      .catch(() => {
+        if (!cancelled) setInsight(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, selectedId]);
 
   const highlight = useMemo(() => {
@@ -145,8 +161,8 @@ function List({ title, items }: { title: string; items: string[] }) {
         <div className="text-sm text-ink-600/60">None</div>
       ) : (
         <ul className="space-y-1 text-sm">
-          {items.map((i) => (
-            <li key={i}>• {i}</li>
+          {items.map((item, index) => (
+            <li key={`${title}-${index}-${item}`}>• {item}</li>
           ))}
         </ul>
       )}

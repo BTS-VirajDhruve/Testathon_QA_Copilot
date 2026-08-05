@@ -8,8 +8,9 @@ from typing import Any
 from app.core.logging import get_logger
 from app.graph.ingestion import get_flow_ingester
 from app.graph.store import get_graph_store
-from app.models.enums import NodeType, RelationshipType, SourceType
+from app.models.enums import LLMTaskType, NodeType, RelationshipType, SourceType
 from app.models.schemas import GraphEdge, GraphNode, Provenance, new_id
+from app.services.model_router import ModelRoutingContext
 from app.services.openai_service import get_openai_service
 
 logger = get_logger(__name__)
@@ -79,6 +80,11 @@ class EntityExtractor:
                     "Extract explicit software entities mentioned in the text. "
                     "Return JSON {entities:[{name,type}]}. Do not invent.",
                     text[:4000],
+                    task_type=LLMTaskType.ENTITY_EXTRACTION,
+                    routing_context=ModelRoutingContext(
+                        project_id=project_id,
+                        task_type=LLMTaskType.ENTITY_EXTRACTION,
+                    ),
                 )
                 for ent in data.get("entities", [])[:10]:
                     name = ent.get("name")

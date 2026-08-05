@@ -1,0 +1,69 @@
+[
+  {
+    "test_case_id": "TC-ECOM-001",
+    "title": "Successful Google OAuth sign-in",
+    "graph_path": ["ShopEase Ecommerce", "Sign In", "Google OAuth", "Consent", "OAuth Callback", "Session Creation"],
+    "priority": "high",
+    "category": "functional",
+    "steps": [
+      "Open Sign In",
+      "Choose Continue with Google",
+      "Approve consent",
+      "Complete OAuth callback"
+    ],
+    "expected_result": "Authenticated session is created only after successful callback; user lands on Product Catalog."
+  },
+  {
+    "test_case_id": "TC-ECOM-002",
+    "title": "Add Classic Tee to cart",
+    "graph_path": ["ShopEase Ecommerce", "Shopping Cart", "Add to Cart"],
+    "priority": "high",
+    "category": "functional",
+    "steps": [
+      "Browse Product Catalog",
+      "Select Classic Tee quantity 1",
+      "Click Add to Cart"
+    ],
+    "expected_result": "Cart count increments; Classic Tee appears as a line item with unit price INR 799."
+  },
+  {
+    "test_case_id": "TC-ECOM-003",
+    "title": "Remove item from cart",
+    "graph_path": ["ShopEase Ecommerce", "Shopping Cart", "Remove from Cart"],
+    "priority": "medium",
+    "category": "functional",
+    "steps": [
+      "Ensure cart has at least one line item",
+      "Click Remove on that line",
+      "Observe Review Cart totals"
+    ],
+    "expected_result": "Line item is removed and bill preview recalculates immediately."
+  },
+  {
+    "test_case_id": "TC-ECOM-004",
+    "title": "Apply SAVE10 discount on single GST item",
+    "graph_path": ["ShopEase Ecommerce", "Checkout", "Apply Discount", "Valid Promo Code"],
+    "priority": "high",
+    "category": "functional",
+    "steps": [
+      "Add 1× Wireless Earbuds to cart",
+      "Proceed to Checkout Review Cart",
+      "Apply promo SAVE10"
+    ],
+    "expected_result": "Discount INR 249.90 applied; GST and payable total match billing rules (payable 2653.94)."
+  },
+  {
+    "test_case_id": "TC-ECOM-005",
+    "title": "Happy path card checkout with free shipping",
+    "graph_path": ["ShopEase Ecommerce", "Checkout", "Payment Methods", "Credit Debit Card", "Place Order", "Order Confirmation"],
+    "priority": "high",
+    "category": "functional",
+    "steps": [
+      "Sign in",
+      "Add Wireless Earbuds",
+      "Complete valid Billing Form",
+      "Pay with Credit Debit Card successfully"
+    ],
+    "expected_result": "Order Confirmation shows order ID and payable total matching Review Cart; delivery charges are 0."
+  }
+]

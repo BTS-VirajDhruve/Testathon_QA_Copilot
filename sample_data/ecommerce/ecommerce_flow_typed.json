@@ -1,0 +1,311 @@
+{
+  "root": "ShopEase Ecommerce",
+  "description": "Typed nested flow for ShopEase: authentication, catalog, cart, checkout, discounts, GST-inclusive billing, and payment.",
+  "branches": [
+    {
+      "name": "Sign In",
+      "type": "Feature",
+      "description": "Customer authentication before checkout and account actions",
+      "is_critical": true,
+      "criticality": "high",
+      "children": [
+        {
+          "name": "Self Registration",
+          "type": "AlternateFlow",
+          "description": "New customer creates account with email verification",
+          "children": [
+            { "name": "Email Verification", "type": "Validation" },
+            { "name": "Profile Creation", "type": "UserFlow" },
+            {
+              "name": "Duplicate Email Rejection",
+              "type": "FailurePath",
+              "is_failure_path": true
+            }
+          ]
+        },
+        {
+          "name": "Google OAuth",
+          "type": "AuthenticationMethod",
+          "description": "Social sign-in via Google",
+          "is_external_dependency": true,
+          "children": [
+            { "name": "Consent", "type": "UserFlow" },
+            {
+              "name": "OAuth Callback",
+              "type": "UserFlow",
+              "is_critical": true,
+              "criticality": "high"
+            },
+            {
+              "name": "Provider Failure",
+              "type": "FailurePath",
+              "is_failure_path": true,
+              "is_external_dependency": true
+            },
+            { "name": "Account Linking", "type": "UserFlow" }
+          ]
+        },
+        {
+          "name": "Email Password Login",
+          "type": "AuthenticationMethod",
+          "children": [
+            { "name": "Valid Credentials", "type": "UserFlow" },
+            {
+              "name": "Invalid Password",
+              "type": "FailurePath",
+              "is_failure_path": true
+            },
+            {
+              "name": "Account Lockout",
+              "type": "FailurePath",
+              "is_failure_path": true,
+              "is_critical": true,
+              "criticality": "high"
+            }
+          ]
+        },
+        { "name": "Session Creation", "type": "State" },
+        {
+          "name": "Log Out",
+          "type": "UserFlow",
+          "description": "Invalidate session and clear cart association for guest resume rules"
+        }
+      ]
+    },
+    {
+      "name": "Product Catalog",
+      "type": "Feature",
+      "description": "Browse and select from the active product catalog (4 SKUs)",
+      "children": [
+        { "name": "Browse Products", "type": "UserFlow" },
+        {
+          "name": "Product Selection",
+          "type": "UserFlow",
+          "description": "Select quantity and variant before add-to-cart"
+        },
+        {
+          "name": "Classic Tee",
+          "type": "Component",
+          "description": "SKU TEE-001, base price INR 799, GST 5%"
+        },
+        {
+          "name": "Wireless Earbuds",
+          "type": "Component",
+          "description": "SKU AUD-014, base price INR 2499, GST 18%"
+        },
+        {
+          "name": "Desk Lamp",
+          "type": "Component",
+          "description": "SKU HOM-220, base price INR 1299, GST 12%"
+        },
+        {
+          "name": "Canvas Tote",
+          "type": "Component",
+          "description": "SKU ACC-088, base price INR 499, GST 5%"
+        },
+        {
+          "name": "Out of Stock",
+          "type": "FailurePath",
+          "is_failure_path": true,
+          "description": "Selected SKU unavailable; add-to-cart blocked"
+        }
+      ]
+    },
+    {
+      "name": "Shopping Cart",
+      "type": "Feature",
+      "description": "Cart mutations before checkout",
+      "is_critical": true,
+      "criticality": "high",
+      "children": [
+        {
+          "name": "Add to Cart",
+          "type": "UserFlow",
+          "is_critical": true,
+          "criticality": "high"
+        },
+        {
+          "name": "Remove from Cart",
+          "type": "UserFlow"
+        },
+        {
+          "name": "Update Quantity",
+          "type": "UserFlow",
+          "children": [
+            {
+              "name": "Quantity Below Minimum",
+              "type": "FailurePath",
+              "is_failure_path": true
+            },
+            {
+              "name": "Quantity Above Stock",
+              "type": "FailurePath",
+              "is_failure_path": true
+            }
+          ]
+        },
+        {
+          "name": "Empty Cart",
+          "type": "AlternateFlow",
+          "description": "Checkout disabled when cart has zero line items"
+        }
+      ]
+    },
+    {
+      "name": "Checkout",
+      "type": "Feature",
+      "description": "Review, discount, billing, payment, and order placement",
+      "is_critical": true,
+      "criticality": "high",
+      "children": [
+        { "name": "Review Cart", "type": "UserFlow" },
+        {
+          "name": "Apply Discount",
+          "type": "SubFeature",
+          "description": "Promo code validation and stacking rules",
+          "children": [
+            {
+              "name": "Valid Promo Code",
+              "type": "BusinessRule",
+              "description": "SAVE10 = 10% off merchandise subtotal before GST"
+            },
+            {
+              "name": "FLAT100",
+              "type": "BusinessRule",
+              "description": "Flat INR 100 off merchandise subtotal; min cart INR 500"
+            },
+            {
+              "name": "Expired Promo",
+              "type": "FailurePath",
+              "is_failure_path": true
+            },
+            {
+              "name": "Promo Stacking Rejected",
+              "type": "FailurePath",
+              "is_failure_path": true,
+              "is_critical": true,
+              "criticality": "high",
+              "description": "Only one promo may apply per order"
+            },
+            {
+              "name": "Remove Discount",
+              "type": "AlternateFlow"
+            }
+          ]
+        },
+        {
+          "name": "Billing Form",
+          "type": "SubFeature",
+          "children": [
+            {
+              "name": "Name Address Phone",
+              "type": "Validation",
+              "description": "Required billing fields with Indian phone format"
+            },
+            {
+              "name": "Invalid Billing Fields",
+              "type": "FailurePath",
+              "is_failure_path": true
+            },
+            {
+              "name": "Delivery Address Same As Billing",
+              "type": "AlternateFlow"
+            }
+          ]
+        },
+        {
+          "name": "Payment Methods",
+          "type": "SubFeature",
+          "is_critical": true,
+          "criticality": "high",
+          "children": [
+            {
+              "name": "Credit Debit Card",
+              "type": "UserFlow",
+              "is_critical": true,
+              "criticality": "high"
+            },
+            {
+              "name": "UPI",
+              "type": "UserFlow",
+              "is_external_dependency": true
+            },
+            {
+              "name": "Cash on Delivery",
+              "type": "UserFlow",
+              "description": "COD allowed only when order total <= INR 5000"
+            },
+            {
+              "name": "Payment Decline",
+              "type": "FailurePath",
+              "is_failure_path": true,
+              "is_external_dependency": true
+            },
+            {
+              "name": "Payment Gateway Timeout",
+              "type": "FailurePath",
+              "is_failure_path": true,
+              "is_external_dependency": true,
+              "is_critical": true,
+              "criticality": "high"
+            }
+          ]
+        },
+        {
+          "name": "Bill Amount Generation",
+          "type": "BusinessRule",
+          "description": "Subtotal − discount + GST + delivery charges = payable total",
+          "is_critical": true,
+          "criticality": "high",
+          "children": [
+            {
+              "name": "Merchandise Subtotal",
+              "type": "BusinessRule"
+            },
+            {
+              "name": "GST Calculation",
+              "type": "BusinessRule",
+              "description": "GST applied per-line at product GST rate on discounted line amount"
+            },
+            {
+              "name": "Delivery Charges",
+              "type": "BusinessRule",
+              "description": "Flat INR 49 below free-shipping threshold INR 999; else INR 0. GST not applied on delivery."
+            },
+            {
+              "name": "Payable Total",
+              "type": "Validation",
+              "is_critical": true,
+              "criticality": "high"
+            },
+            {
+              "name": "Incorrect Total Display",
+              "type": "FailurePath",
+              "is_failure_path": true,
+              "is_critical": true,
+              "criticality": "high"
+            }
+          ]
+        },
+        {
+          "name": "Place Order",
+          "type": "UserFlow",
+          "is_critical": true,
+          "criticality": "high"
+        },
+        {
+          "name": "Order Confirmation",
+          "type": "State"
+        },
+        {
+          "name": "Inventory Reservation Failure",
+          "type": "FailurePath",
+          "is_failure_path": true,
+          "is_external_dependency": true,
+          "is_critical": true,
+          "criticality": "high"
+        }
+      ]
+    }
+  ]
+}

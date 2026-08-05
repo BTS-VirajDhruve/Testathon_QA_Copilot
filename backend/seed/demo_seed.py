@@ -284,22 +284,19 @@ def seed_signin_demo(*, force: bool = False) -> dict[str, Any]:
     # Upsert seed tests/bugs by stable IDs — never invent extra seed copies
     for tc in EXISTING_TESTS:
         payload = {**tc, "project_id": project_id, "source": "demo_seed"}
-        store.test_cases[tc["test_case_id"]] = payload
+        store.upsert_test_case(project_id, payload)
     for bug in HISTORICAL_BUGS:
         payload = {**bug, "project_id": project_id, "source": "demo_seed"}
-        store.bugs[bug["bug_id"]] = payload
+        store.upsert_bug(project_id, payload)
 
-    # Remove legacy seed IDs that are no longer part of the curated set
-    for legacy_id in ("TC-004", "TC-005", "BUG-021"):
-        existing_item = store.test_cases.get(legacy_id) or store.bugs.get(legacy_id)
-        if not existing_item:
-            continue
-        if existing_item.get("project_id") != project_id:
-            continue
-        if legacy_id.startswith("TC-") and legacy_id in store.test_cases:
-            del store.test_cases[legacy_id]
-        if legacy_id.startswith("BUG-") and legacy_id in store.bugs:
-            del store.bugs[legacy_id]
+    # Restore curated demo catalog after Copilot persistence so re-Load Demo
+    # keeps intentional coverage gaps (SSO Timeout / Account Lockout).
+    for tc_id, tc in list(store.test_cases.items()):
+        if tc.get("project_id") == project_id and tc.get("test_case_id") not in SEED_TEST_IDS:
+            del store.test_cases[tc_id]
+    for bug_id, bug in list(store.bugs.items()):
+        if bug.get("project_id") == project_id and bug.get("bug_id") not in SEED_BUG_IDS:
+            del store.bugs[bug_id]
 
     store.persist()
 

@@ -23,9 +23,11 @@ function Stat({
 export function DashboardCards({
   stats,
   project,
+  onStatClick,
 }: {
   stats: DashboardStats | null;
   project: Project | null;
+  onStatClick?: (key: "tests" | "critical" | "gaps" | "bugs") => void;
 }) {
   if (!stats) {
     return (
@@ -39,9 +41,38 @@ export function DashboardCards({
       <Stat label="Risk level" value={stats.risk_level.toUpperCase()} hint={project?.name} />
       <Stat label="Graph coverage" value={`${stats.graph_coverage}%`} hint="Weighted path score" />
       <Stat label="Branch coverage" value={`${stats.branch_coverage}%`} />
-      <Stat label="Test cases" value={stats.test_case_count} hint={`${stats.critical_test_count} high/critical`} />
-      <Stat label="Historical bugs" value={stats.historical_bugs} />
-      <Stat label="Coverage gaps" value={stats.coverage_gaps.length} hint={stats.uncovered_branches.slice(0, 2).join(", ")} />
+      <button
+        type="button"
+        className="text-left disabled:cursor-default"
+        onClick={() => onStatClick?.("tests")}
+        disabled={!onStatClick}
+      >
+        <Stat
+          label="Test cases"
+          value={stats.test_case_count}
+          hint={`${stats.critical_test_count} high/critical`}
+        />
+      </button>
+      <button
+        type="button"
+        className="text-left disabled:cursor-default"
+        onClick={() => onStatClick?.("bugs")}
+        disabled={!onStatClick}
+      >
+        <Stat label="Historical bugs" value={stats.historical_bugs} />
+      </button>
+      <button
+        type="button"
+        className="text-left disabled:cursor-default"
+        onClick={() => onStatClick?.("gaps")}
+        disabled={!onStatClick}
+      >
+        <Stat
+          label="Coverage gaps"
+          value={stats.coverage_gaps.length}
+          hint={stats.uncovered_branches.slice(0, 2).join(", ")}
+        />
+      </button>
       <Stat label="Graph nodes" value={stats.node_count} hint={`${stats.edge_count} edges`} />
       <Stat label="Confidence" value={stats.confidence.toUpperCase()} />
     </div>

@@ -13,6 +13,22 @@ type CoverageView = {
   calculation_notes?: string[];
 };
 
+function normalizeGap(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function uniqueStrings(values: string[] | undefined | null): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values || []) {
+    const key = normalizeGap(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value.trim());
+  }
+  return out;
+}
+
 export function CoveragePanel({
   projectId,
   result,
@@ -27,6 +43,7 @@ export function CoveragePanel({
   async function load() {
     setLoading(true);
     setError(null);
+    setCoverage(null);
     try {
       const c = await api.coverage(projectId);
       setCoverage(c);
@@ -40,17 +57,35 @@ export function CoveragePanel({
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, result]);
 
-  const data: CoverageView | null = result?.coverage_after
+  const resultForProject =
+    result && (!result.project_id || result.project_id === projectId) ? result : null;
+
+  const data: CoverageView | null = resultForProject?.coverage_after
     ? {
-        overall_coverage: result.coverage_after.overall_coverage,
-        branch_coverage: result.coverage_after.branch_coverage,
-        uncovered_branches: result.coverage_after.uncovered_branches,
-        critical_gaps: result.coverage_after.critical_gaps,
-        calculation_notes: result.coverage_after.calculation_notes,
+        overall_coverage: resultForProject.coverage_after.overall_coverage,
+        branch_coverage: resultForProject.coverage_after.branch_coverage,
+        uncovered_branches: uniqueStrings(resultForProject.coverage_after.uncovered_branches),
+        critical_gaps: uniqueStrings(resultForProject.coverage_after.critical_gaps),
+        calculation_notes: uniqueStrings(resultForProject.coverage_after.calculation_notes),
       }
-    : result?.coverage || coverage;
+    : resultForProject?.coverage
+      ? {
+          ...resultForProject.coverage,
+          uncovered_branches: uniqueStrings(resultForProject.coverage.uncovered_branches),
+          critical_gaps: uniqueStrings(resultForProject.coverage.critical_gaps),
+          calculation_notes: uniqueStrings(resultForProject.coverage.calculation_notes),
+        }
+      : coverage
+        ? {
+            ...coverage,
+            uncovered_branches: uniqueStrings(coverage.uncovered_branches),
+            critical_gaps: uniqueStrings(coverage.critical_gaps),
+            calculation_notes: uniqueStrings(coverage.calculation_notes),
+          }
+        : null;
 
   return (
     <section className="panel p-6">
@@ -66,27 +101,27 @@ export function CoveragePanel({
         </div>
       ) : null}
 
-      {result?.coverage_before || result?.coverage_after ? (
+      {resultForProject?.coverage_before || resultForProject?.coverage_after ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
             <div className="text-xs uppercase tracking-[0.14em] text-ink-600/60">Before regeneration</div>
             <div className="mt-1 font-display text-3xl">
-              {result.coverage_before?.coverage_percentage ?? "—"}%
+              {resultForProject.coverage_before?.coverage_percentage ?? "—"}%
             </div>
             <div className="mt-1 text-sm text-ink-700/70">
-              {result.coverage_before
-                ? `${result.coverage_before.covered_paths}/${result.coverage_before.total_paths} paths`
+              {resultForProject.coverage_before
+                ? `${resultForProject.coverage_before.covered_paths}/${resultForProject.coverage_before.total_paths} paths`
                 : "—"}
             </div>
           </div>
           <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
             <div className="text-xs uppercase tracking-[0.14em] text-ink-600/60">After regeneration</div>
             <div className="mt-1 font-display text-3xl">
-              {result.coverage_after?.coverage_percentage ?? "—"}%
+              {resultForProject.coverage_after?.coverage_percentage ?? "—"}%
             </div>
             <div className="mt-1 text-sm text-ink-700/70">
-              {result.coverage_after
-                ? `${result.coverage_after.covered_paths}/${result.coverage_after.total_paths} paths`
+              {resultForProject.coverage_after
+                ? `${resultForProject.coverage_after.covered_paths}/${resultForProject.coverage_after.total_paths} paths`
                 : "—"}
             </div>
           </div>
@@ -100,7 +135,9 @@ export function CoveragePanel({
       ) : null}
 
       {!data && !loading ? (
-        <p className="mt-4 text-sm text-ink-600/70">No coverage data yet. Run the Copilot or retry.</p>
+        <p className="mt-4 text-sm text-ink-600/70">
+          Coverage unavailable until a graph and tests exist for this project.
+        </p>
       ) : data ? (
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           <div className="rounded-2xl bg-ink-900 p-5 text-mist-50">
@@ -111,8 +148,8 @@ export function CoveragePanel({
           <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
             <div className="label mb-2">Uncovered branches</div>
             <ul className="space-y-1 text-sm">
-              {(data.uncovered_branches || []).map((b) => (
-                <li key={b}>• {b}</li>
+              {(data.uncovered_branches || []).map((b, index) => (
+                <li key={`${normalizeGap(b)}-${index}`}>• {b}</li>
               ))}
               {(data.uncovered_branches || []).length === 0 ? (
                 <li className="text-ink-600/70">None reported</li>
@@ -122,8 +159,8 @@ export function CoveragePanel({
           <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
             <div className="label mb-2">Critical gaps</div>
             <ul className="space-y-1 text-sm">
-              {(data.critical_gaps || []).map((g) => (
-                <li key={g}>• {g}</li>
+              {(data.critical_gaps || []).map((g, index) => (
+                <li key={`${normalizeGap(g)}-${index}`}>• {g}</li>
               ))}
               {(data.critical_gaps || []).length === 0 ? (
                 <li className="text-ink-600/70">None reported</li>
@@ -133,8 +170,8 @@ export function CoveragePanel({
           <div className="rounded-2xl border border-ink-700/10 bg-white/70 p-4">
             <div className="label mb-2">How the score was calculated</div>
             <ul className="space-y-1 text-xs leading-relaxed text-ink-700/80">
-              {(data.calculation_notes || []).map((n) => (
-                <li key={n}>• {n}</li>
+              {(data.calculation_notes || []).map((n, index) => (
+                <li key={`${normalizeGap(n)}-${index}`}>• {n}</li>
               ))}
             </ul>
           </div>

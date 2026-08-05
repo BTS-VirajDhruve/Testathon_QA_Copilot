@@ -128,6 +128,8 @@ class GraphTraversalService:
 
     def impact_analysis(self, project_id: str, changed_name_or_id: str) -> ImpactAnalysisResult:
         node = self.store.get_node(changed_name_or_id)
+        if node and node.project_id != project_id:
+            node = None
         if not node:
             node = self.store.find_node_by_name(project_id, changed_name_or_id)
         if not node:
@@ -202,6 +204,9 @@ class CoverageEngine:
         self.traversal = GraphTraversalService()
 
     def analyze(self, project_id: str, root_feature: str | None = None) -> CoverageGapResult:
+        # Lazy import avoids circular import: graph ↔ agents package init
+        from app.agents.dedup import dedupe_strings
+
         root = self.traversal.resolve_root(project_id, root_feature)
         if not root:
             return CoverageGapResult(
@@ -259,18 +264,19 @@ class CoverageEngine:
         overall = round((0.4 * branch_cov + 0.3 * failure_cov + 0.2 * dep_cov + 0.1 * root_cov) * 100, 1)
 
         critical_gaps: list[str] = []
-        for name in uncovered_branches:
+        for name in dedupe_strings(uncovered_branches):
             node = next((b for b in branches if b.name == name), None)
             if node and (node.is_critical or node.is_external_dependency or "sso" in name.lower()):
                 critical_gaps.append(f"Uncovered branch: {name}")
-        for name in uncovered_failures:
+        for name in dedupe_strings(uncovered_failures):
             critical_gaps.append(f"Uncovered failure path: {name}")
-        for name in uncovered_deps:
+        for name in dedupe_strings(uncovered_deps):
             critical_gaps.append(f"Uncovered external dependency: {name}")
+        critical_gaps = dedupe_strings(critical_gaps)
 
-        recommended = [f"Add path coverage for {n}" for n in uncovered_branches[:8]]
-        recommended += [f"Add negative/failure test for {n}" for n in uncovered_failures[:5]]
-
+        recommended = [f"Add path coverage for {n}" for n in dedupe_strings(uncovered_branches)[:8]]
+        recommended += [f"Add negative/failure test for {n}" for n in dedupe_strings(uncovered_failures)[:5]]
+        recommended = dedupe_strings(recommended)
         notes = [
             f"Root feature coverage = 100% if any branch/path is covered, else 0% → {root_cov * 100:.0f}%",
             f"Branch coverage = covered_branches / direct_children = {len(covered_branches)}/{len(branches)} → {branch_cov * 100:.0f}%",
@@ -283,12 +289,12 @@ class CoverageEngine:
 
         return CoverageGapResult(
             root_feature=root.name,
-            covered_branches=covered_branches,
-            uncovered_branches=uncovered_branches,
-            uncovered_failure_paths=uncovered_failures,
-            uncovered_dependencies=uncovered_deps,
-            uncovered_states=uncovered_states,
-            uncovered_business_rules=uncovered_rules,
+            covered_branches=dedupe_strings(covered_branches),
+            uncovered_branches=dedupe_strings(uncovered_branches),
+            uncovered_failure_paths=dedupe_strings(uncovered_failures),
+            uncovered_dependencies=dedupe_strings(uncovered_deps),
+            uncovered_states=dedupe_strings(uncovered_states),
+            uncovered_business_rules=dedupe_strings(uncovered_rules),
             critical_gaps=critical_gaps,
             recommended_tests=recommended,
             root_feature_coverage=round(root_cov * 100, 1),

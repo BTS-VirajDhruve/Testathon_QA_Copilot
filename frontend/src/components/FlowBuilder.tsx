@@ -103,14 +103,17 @@ function FlowBuilderInner({
   const [history, setHistory] = useState<SystemFlowGraph[]>([graph]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [nlText, setNlText] = useState(
-    "Sign in supports email password, Google OAuth, enterprise SSO, and self-registration. Email login supports MFA and forgot password."
+    "Describe any feature: e.g. Checkout supports guest checkout, registered user, payment, and address validation."
   );
   const [importJson, setImportJson] = useState("");
+  const [nlBusy, setNlBusy] = useState(false);
+  const [nlProgress, setNlProgress] = useState<string | null>(null);
 
   useEffect(() => {
     const laid = layoutTree(graph);
     setNodes(laid.nodes);
     setEdges(laid.edges);
+    setSelectedId(graph.root_node_id || graph.nodes[0]?.id || null);
   }, [graph, setNodes, setEdges]);
 
   const selected = useMemo(
@@ -229,10 +232,19 @@ function FlowBuilderInner({
 
   async function handleNl() {
     try {
-      await api.flowFromText(projectId, nlText);
+      setNlBusy(true);
+      setNlProgress("Reading input...");
+      await api.flowFromTextStream(projectId, nlText, (ev) => {
+        setNlProgress(ev.message || ev.stage);
+      });
+      setNlProgress("Rendering graph...");
       await onImported();
+      setNlProgress(null);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "Natural-language graph generation failed");
+      setNlProgress(null);
+    } finally {
+      setNlBusy(false);
     }
   }
 
@@ -246,7 +258,7 @@ function FlowBuilderInner({
   }
 
   function resetRoot() {
-    pushHistory(emptyGraph(projectId, "Sign In"));
+    pushHistory(emptyGraph(projectId, "Root Feature"));
   }
 
   return (
@@ -384,7 +396,7 @@ function FlowBuilderInner({
             <div className="label mb-2">JSON import</div>
             <textarea
               className="min-h-24 w-full rounded-xl border border-ink-700/15 px-3 py-2 font-mono text-xs"
-              placeholder='{"root":"Sign In","branches":[...]}'
+              placeholder='{"root":"Checkout","branches":[{"name":"Guest Checkout"},{"name":"Payment"}]}'
               value={importJson}
               onChange={(e) => setImportJson(e.target.value)}
             />
@@ -399,10 +411,20 @@ function FlowBuilderInner({
               className="min-h-24 w-full rounded-xl border border-ink-700/15 px-3 py-2 text-sm"
               value={nlText}
               onChange={(e) => setNlText(e.target.value)}
+              disabled={nlBusy}
             />
-            <button className="btn-brass mt-2 w-full" onClick={handleNl}>
-              <Wand2 className="h-4 w-4" /> Extract graph
+            <button className="btn-brass mt-2 w-full" onClick={handleNl} disabled={nlBusy || busy}>
+              <Wand2 className="h-4 w-4" /> {nlBusy ? "Extracting…" : "Extract graph"}
             </button>
+            {nlProgress ? (
+              <p className="mt-2 text-xs text-ink-600/75" aria-live="polite">
+                {nlProgress}
+              </p>
+            ) : (
+              <p className="mt-2 text-[11px] text-ink-600/55">
+                Deterministic hierarchy · LLM only for uncertain types
+              </p>
+            )}
           </div>
 
           <button className="btn-secondary w-full" onClick={resetRoot}>

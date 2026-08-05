@@ -7,9 +7,10 @@ from typing import Any
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
 from app.graph.traversal import get_traversal
-from app.models.enums import QAIntent
+from app.models.enums import QAIntent, LLMTaskType
 from app.models.schemas import FusedContext, RetrievalPlan
 from app.rag.vector_store import get_vector_store
+from app.services.model_router import ModelRoutingContext
 from app.services.openai_service import get_openai_service
 
 logger = get_logger(__name__)
@@ -30,7 +31,20 @@ class RetrievalPlanner:
                 QAIntent.BUG_REPORT,
                 QAIntent.REQUIREMENTS_ANALYSIS,
             }
-            or any(k in q for k in ("sign in", "login", "oauth", "sso", "feature", "flow", "path"))
+            or any(
+                k in q
+                for k in (
+                    "feature",
+                    "flow",
+                    "path",
+                    "branch",
+                    "journey",
+                    "module",
+                    "workflow",
+                    "screen",
+                    "page",
+                )
+            )
         )
         use_vector = intent in {
             QAIntent.TEST_GENERATION,
@@ -119,6 +133,11 @@ class IntentClassifier:
                 "If the user asks to generate tests and also identify coverage gaps, "
                 "prefer test_generation.",
                 query,
+                task_type=LLMTaskType.INTENT_CLASSIFICATION,
+                routing_context=ModelRoutingContext(
+                    task_type=LLMTaskType.INTENT_CLASSIFICATION,
+                    query=query,
+                ),
             )
             try:
                 return QAIntent(data.get("intent", "general_qa"))
@@ -220,6 +239,7 @@ class ContextFusionLayer:
                         "title": tc.get("title"),
                         "graph_path": tc.get("graph_path"),
                         "priority": tc.get("priority"),
+                        "project_id": project_id,
                         "source_type": "existing_test",
                     }
                 )
@@ -235,6 +255,7 @@ class ContextFusionLayer:
                         "severity": bug.get("severity"),
                         "affected_components": bug.get("affected_components"),
                         "graph_path": bug.get("graph_path"),
+                        "project_id": project_id,
                         "source_type": "historical_bug",
                     }
                 )
@@ -243,10 +264,11 @@ class ContextFusionLayer:
             external_context.append(
                 {
                     "note": "External search flagged by planner but not executed in offline demo mode.",
-                    "suggestion": "Consult OWASP ASVS / Auth Cheat Sheet for SSO and OAuth risks.",
+                    "suggestion": "Consult domain-relevant security and quality standards for the selected feature.",
                 }
             )
 
+        feature_context["project_id"] = project_id
         fused = FusedContext(
             feature_context=feature_context,
             flow_paths=flow_paths,
@@ -256,14 +278,52 @@ class ContextFusionLayer:
             historical_risks=historical_risks[:40],
             external_context=external_context,
         )
+        fused = assert_project_consistency(fused, project_id)
         logger.info(
             "context_fused",
+            project_id=project_id,
             paths=len(flow_paths),
-            semantic=len(semantic_context),
-            tests=len(existing_coverage),
-            bugs=len(historical_risks),
+            semantic=len(fused.semantic_context),
+            tests=len(fused.existing_coverage),
+            bugs=len(fused.historical_risks),
         )
         return plan, fused
+
+
+def assert_project_consistency(fused: FusedContext, project_id: str) -> FusedContext:
+    """Drop any fused evidence that belongs to another project before LLM generation."""
+
+    def _item_project(item: dict[str, Any]) -> str | None:
+        if item.get("project_id"):
+            return str(item["project_id"])
+        meta = item.get("metadata") or {}
+        if isinstance(meta, dict) and meta.get("project_id"):
+            return str(meta["project_id"])
+        return None
+
+    dropped = 0
+
+    def _filter(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        nonlocal dropped
+        kept: list[dict[str, Any]] = []
+        for item in items:
+            pid = _item_project(item)
+            if pid is not None and pid != project_id:
+                dropped += 1
+                continue
+            kept.append(item)
+        return kept
+
+    fused.semantic_context = _filter(fused.semantic_context)
+    fused.existing_coverage = _filter(fused.existing_coverage)
+    fused.historical_risks = _filter(fused.historical_risks)
+    if dropped:
+        logger.warning(
+            "mixed_project_evidence_dropped",
+            project_id=project_id,
+            dropped=dropped,
+        )
+    return fused
 
 
 def get_intent_classifier() -> IntentClassifier:

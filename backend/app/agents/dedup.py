@@ -1,4 +1,4 @@
-"""Deterministic test-case deduplication for critic-targeted regeneration."""
+"""Deterministic test-case and string-list deduplication."""
 
 from __future__ import annotations
 
@@ -15,6 +15,22 @@ def normalize_text(value: str | None) -> str:
     text = (value or "").strip().lower()
     text = _PUNCT.sub(" ", text)
     return _WS.sub(" ", text).strip()
+
+
+def dedupe_strings(values: list[str] | None) -> list[str]:
+    """Preserve first human-readable form; dedupe case-insensitively with collapsed whitespace."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values or []:
+        if not isinstance(value, str):
+            continue
+        stripped = value.strip()
+        normalized = _WS.sub(" ", stripped).casefold()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(stripped)
+    return result
 
 
 def normalize_path(path: list[str] | None) -> tuple[str, ...]:
@@ -59,14 +75,11 @@ def is_duplicate(
 
     for other in existing:
         o_title, o_steps, o_expected, o_path = _fingerprint(other)
-        # Exact semantic fingerprint match
         if cand_fp == (o_title, o_steps, o_expected, o_path):
             return True
-        # Strong overlap: same path + same expected + same steps (title may differ)
         if cand_path and cand_path == o_path and cand_steps and cand_steps == o_steps:
             if cand_expected == o_expected or not cand_expected or not o_expected:
                 return True
-        # Same normalized title AND same graph path (steps may be paraphrased)
         if cand_title and cand_title == o_title and cand_path and cand_path == o_path:
             return True
     return False

@@ -1,6 +1,13 @@
 """Agents package."""
 
 from app.agents.orchestrator import QAOrchestrator, get_orchestrator
+from app.agents.bdd import (
+    build_generated_artifacts,
+    convert_test_to_bdd,
+    render_feature_file,
+    render_gherkin,
+    validate_bdd_scenario,
+)
 from app.agents.specialists import (
     BugReportAgent,
     CoverageAgent,
@@ -11,6 +18,7 @@ from app.agents.specialists import (
     RiskAgent,
     TestCaseAgent,
 )
+from app.agents.test_review_automation import TestReviewAutomationAgent
 
 __all__ = [
     "QAOrchestrator",
@@ -23,4 +31,10 @@ __all__ = [
     "RegressionAgent",
     "RiskAgent",
     "TestCaseAgent",
+    "TestReviewAutomationAgent",
+    "build_generated_artifacts",
+    "convert_test_to_bdd",
+    "render_feature_file",
+    "render_gherkin",
+    "validate_bdd_scenario",
 ]

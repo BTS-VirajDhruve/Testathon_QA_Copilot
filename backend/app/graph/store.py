@@ -66,7 +66,187 @@ class InMemoryGraphStore:
         self.test_cases: dict[str, dict[str, Any]] = {}
         self.bugs: dict[str, dict[str, Any]] = {}
         self.graph_versions: dict[str, list[dict[str, Any]]] = {}
+        # project_id -> last Copilot analysis payload (JSON-serializable)
+        self.latest_analyses: dict[str, dict[str, Any]] = {}
+        # project_id::test_case_id -> persisted validity/automation review record
+        self.test_reviews: dict[str, dict[str, Any]] = {}
+        # project_id::test_case_id -> human automation-review override
+        self.test_review_overrides: dict[str, dict[str, Any]] = {}
+        # source_id -> ExternalKnowledgeSource (Atlassian imports)
+        self.external_knowledge_sources: dict[str, dict[str, Any]] = {}
         self._load()
+
+    @staticmethod
+    def artifact_key(project_id: str, artifact_id: str) -> str:
+        """Namespace artifact dict keys so TC-001 in project A cannot overwrite project B."""
+        if "::" in artifact_id and artifact_id.startswith(f"{project_id}::"):
+            return artifact_id
+        return f"{project_id}::{artifact_id}"
+
+    def upsert_test_case(self, project_id: str, case: dict[str, Any]) -> dict[str, Any]:
+        payload = {**case, "project_id": project_id}
+        tid = str(payload.get("test_case_id") or "")
+        if not tid:
+            from app.models.schemas import new_id
+
+            tid = new_id("TC")
+            payload["test_case_id"] = tid
+        key = self.artifact_key(project_id, tid)
+        with self._lock:
+            # Drop legacy bare-key collision for the same project
+            legacy = self.test_cases.get(tid)
+            if legacy and legacy.get("project_id") == project_id and tid != key:
+                del self.test_cases[tid]
+            self.test_cases[key] = payload
+            self.persist()
+        return payload
+
+    def get_test_case(self, project_id: str, test_case_id: str) -> dict[str, Any] | None:
+        key = self.artifact_key(project_id, test_case_id)
+        with self._lock:
+            row = self.test_cases.get(key)
+            if row and row.get("project_id") == project_id:
+                return row
+            # Legacy bare key
+            legacy = self.test_cases.get(test_case_id)
+            if legacy and legacy.get("project_id") == project_id:
+                return legacy
+        return None
+
+    def delete_test_case(self, project_id: str, test_case_id: str) -> bool:
+        key = self.artifact_key(project_id, test_case_id)
+        with self._lock:
+            removed = False
+            if key in self.test_cases and self.test_cases[key].get("project_id") == project_id:
+                del self.test_cases[key]
+                removed = True
+            legacy = self.test_cases.get(test_case_id)
+            if legacy and legacy.get("project_id") == project_id:
+                del self.test_cases[test_case_id]
+                removed = True
+            if removed:
+                self.persist()
+            return removed
+
+    def update_project_meta(self, project_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return None
+            project = {**project, **patch}
+            self.projects[project_id] = project
+            self.persist()
+            return project
+
+    def upsert_bug(self, project_id: str, bug: dict[str, Any]) -> dict[str, Any]:
+        payload = {**bug, "project_id": project_id}
+        bid = str(payload.get("bug_id") or "")
+        if not bid:
+            from app.models.schemas import new_id
+
+            bid = new_id("BUG")
+            payload["bug_id"] = bid
+        key = self.artifact_key(project_id, bid)
+        with self._lock:
+            legacy = self.bugs.get(bid)
+            if legacy and legacy.get("project_id") == project_id and bid != key:
+                del self.bugs[bid]
+            self.bugs[key] = payload
+        return payload
+
+    def set_latest_analysis(self, project_id: str, analysis: dict[str, Any]) -> None:
+        with self._lock:
+            self.latest_analyses[project_id] = {**analysis, "project_id": project_id}
+            self.persist()
+
+    def get_latest_analysis(self, project_id: str) -> dict[str, Any] | None:
+        return self.latest_analyses.get(project_id)
+
+    def get_test_review(self, project_id: str, test_case_id: str) -> dict[str, Any] | None:
+        return self.test_reviews.get(self.artifact_key(project_id, test_case_id))
+
+    def list_test_reviews(self, project_id: str) -> dict[str, dict[str, Any]]:
+        prefix = f"{project_id}::"
+        out: dict[str, dict[str, Any]] = {}
+        for key, value in self.test_reviews.items():
+            if key.startswith(prefix):
+                out[key[len(prefix) :]] = value
+            elif value.get("project_id") == project_id:
+                out[str(value.get("test_case_id") or key)] = value
+        return out
+
+    def set_test_review(self, project_id: str, test_case_id: str, review: dict[str, Any]) -> dict[str, Any]:
+        key = self.artifact_key(project_id, test_case_id)
+        payload = {**review, "project_id": project_id, "test_case_id": test_case_id}
+        with self._lock:
+            self.test_reviews[key] = payload
+            self.persist()
+        return payload
+
+    def bulk_set_test_reviews(self, project_id: str, reviews: list[dict[str, Any]]) -> None:
+        with self._lock:
+            for review in reviews:
+                test_case_id = str(review.get("test_case_id") or "")
+                if not test_case_id:
+                    continue
+                key = self.artifact_key(project_id, test_case_id)
+                self.test_reviews[key] = {
+                    **review,
+                    "project_id": project_id,
+                    "test_case_id": test_case_id,
+                }
+            self.persist()
+
+    def get_automation_capability_profile(self, project_id: str) -> dict[str, Any] | None:
+        project = self.projects.get(project_id)
+        if not project:
+            return None
+        profile = project.get("automation_capability_profile")
+        return profile if isinstance(profile, dict) else None
+
+    def set_automation_capability_profile(
+        self, project_id: str, profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                raise KeyError(project_id)
+            project["automation_capability_profile"] = profile
+            self.projects[project_id] = project
+            self.persist()
+            return profile
+
+    def get_test_review_override(
+        self, project_id: str, test_case_id: str
+    ) -> dict[str, Any] | None:
+        key = self.artifact_key(project_id, test_case_id)
+        return self.test_review_overrides.get(key)
+
+    def list_test_review_overrides(self, project_id: str) -> dict[str, dict[str, Any]]:
+        prefix = f"{project_id}::"
+        out: dict[str, dict[str, Any]] = {}
+        for key, value in self.test_review_overrides.items():
+            if key.startswith(prefix):
+                tid = key[len(prefix) :]
+                out[tid] = value
+            elif value.get("project_id") == project_id:
+                tid = str(value.get("test_case_id") or key)
+                out[tid] = value
+        return out
+
+    def set_test_review_override(
+        self, project_id: str, test_case_id: str, override: dict[str, Any]
+    ) -> dict[str, Any]:
+        key = self.artifact_key(project_id, test_case_id)
+        payload = {
+            **override,
+            "project_id": project_id,
+            "test_case_id": test_case_id,
+        }
+        with self._lock:
+            self.test_review_overrides[key] = payload
+            self.persist()
+        return payload
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -80,8 +260,13 @@ class InMemoryGraphStore:
             self.test_cases = raw.get("test_cases", {})
             self.bugs = raw.get("bugs", {})
             self.graph_versions = raw.get("graph_versions", {})
+            self.latest_analyses = raw.get("latest_analyses", {})
+            self.test_reviews = raw.get("test_reviews", {})
+            self.test_review_overrides = raw.get("test_review_overrides", {})
+            self.external_knowledge_sources = raw.get("external_knowledge_sources", {})
             logger.info(
                 "graph_store_loaded",
+                path=str(self.path.resolve()),
                 nodes=len(self.nodes),
                 edges=len(self.edges),
                 projects=len(self.projects),
@@ -99,6 +284,10 @@ class InMemoryGraphStore:
                 "test_cases": self.test_cases,
                 "bugs": self.bugs,
                 "graph_versions": self.graph_versions,
+                "latest_analyses": self.latest_analyses,
+                "test_reviews": self.test_reviews,
+                "test_review_overrides": self.test_review_overrides,
+                "external_knowledge_sources": self.external_knowledge_sources,
             }
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
@@ -419,6 +608,113 @@ class InMemoryGraphStore:
 
     def get_project(self, project_id: str) -> dict[str, Any] | None:
         return self.projects.get(project_id)
+
+    def delete_project(self, project_id: str) -> dict[str, int] | None:
+        """
+        Remove every resource belonging only to this project.
+
+        Returns deletion counts, or None if the project does not exist.
+        Does not touch other projects' data.
+        """
+        with self._lock:
+            if project_id not in self.projects:
+                return None
+
+            node_ids = {
+                nid for nid, node in self.nodes.items() if node.project_id == project_id
+            }
+            nodes_removed = len(node_ids)
+
+            edge_ids = [
+                eid
+                for eid, edge in self.edges.items()
+                if edge.source in node_ids or edge.target in node_ids
+            ]
+            edges_removed = len(edge_ids)
+            for eid in edge_ids:
+                del self.edges[eid]
+            for nid in node_ids:
+                del self.nodes[nid]
+
+            doc_ids = [
+                did for did, doc in self.documents.items() if doc.get("project_id") == project_id
+            ]
+            documents_removed = len(doc_ids)
+            for did in doc_ids:
+                del self.documents[did]
+
+            test_keys = [
+                key
+                for key, case in self.test_cases.items()
+                if case.get("project_id") == project_id or key.startswith(f"{project_id}::")
+            ]
+            tests_removed = len(test_keys)
+            for key in test_keys:
+                del self.test_cases[key]
+
+            bug_keys = [
+                key
+                for key, bug in self.bugs.items()
+                if bug.get("project_id") == project_id or key.startswith(f"{project_id}::")
+            ]
+            bugs_removed = len(bug_keys)
+            for key in bug_keys:
+                del self.bugs[key]
+
+            review_keys = [
+                key
+                for key, review in self.test_reviews.items()
+                if review.get("project_id") == project_id or key.startswith(f"{project_id}::")
+            ]
+            for key in review_keys:
+                del self.test_reviews[key]
+
+            override_keys = [
+                key
+                for key in self.test_review_overrides
+                if key.startswith(f"{project_id}::")
+                or (self.test_review_overrides[key].get("project_id") == project_id)
+            ]
+            for key in override_keys:
+                del self.test_review_overrides[key]
+
+            versions = self.graph_versions.pop(project_id, None) or []
+            analysis = self.latest_analyses.pop(project_id, None)
+            # Coverage / gaps / traces live inside latest analysis (no separate table).
+            coverage_removed = 1 if analysis else 0
+
+            ext_keys = [
+                sid
+                for sid, src in self.external_knowledge_sources.items()
+                if src.get("qa_project_id") == project_id
+            ]
+            for sid in ext_keys:
+                del self.external_knowledge_sources[sid]
+
+            del self.projects[project_id]
+            self.persist()
+
+            logger.info(
+                "project_deleted",
+                project_id=project_id,
+                nodes=nodes_removed,
+                edges=edges_removed,
+                documents=documents_removed,
+                tests=tests_removed,
+                bugs=bugs_removed,
+                graph_versions=len(versions),
+                analysis=bool(analysis),
+            )
+            return {
+                "nodes": nodes_removed,
+                "edges": edges_removed,
+                "documents": documents_removed,
+                "tests": tests_removed,
+                "bugs": bugs_removed,
+                "coverage": coverage_removed,
+                "graph_versions": len(versions),
+                "analyses": 1 if analysis else 0,
+            }
 
 
 class Neo4jGraphStore:

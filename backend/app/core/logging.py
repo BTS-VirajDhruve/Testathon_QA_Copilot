@@ -14,6 +14,17 @@ def configure_logging() -> None:
     settings = get_settings()
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
+    # Windows consoles often default to cp1252; graph path logs use Unicode arrows.
+    # Reconfigure so structlog/print does not raise UnicodeEncodeError mid-request.
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            reconfigure = getattr(stream, "reconfigure", None)
+            if callable(reconfigure):
+                try:
+                    reconfigure(encoding="utf-8", errors="replace")
+                except Exception:  # noqa: BLE001
+                    pass
+
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,

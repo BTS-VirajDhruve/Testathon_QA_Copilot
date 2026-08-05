@@ -1,0 +1,17 @@
+ShopEase Ecommerce is a simple online store with the following system flow.
+
+Sign In supports self registration with email verification and profile creation, Google OAuth with consent and callback (including provider failure and account linking), and email password login with valid credentials, invalid password, and account lockout. After successful auth the system creates a session. Users can log out, which invalidates the session.
+
+Product Catalog lets customers browse products and perform product selection. The catalog has four products: Classic Tee (TEE-001, INR 799, GST 5%), Wireless Earbuds (AUD-014, INR 2499, GST 18%), Desk Lamp (HOM-220, INR 1299, GST 12%), and Canvas Tote (ACC-088, INR 499, GST 5%). Out of stock items cannot be added to cart.
+
+Shopping Cart supports add to cart, remove from cart, and update quantity. Quantity below minimum or above stock are failure paths. An empty cart blocks checkout.
+
+Checkout starts with review cart. Customers can apply discount codes: SAVE10 (10% off merchandise subtotal before GST) and FLAT100 (INR 100 off with minimum cart INR 500). Expired promos and promo stacking are rejected; only one promo per order. Discounts can be removed.
+
+Billing form requires name, address, and phone with validation; invalid billing fields are a failure path. Delivery address may match billing.
+
+Payment methods include credit/debit card, UPI (external), and cash on delivery (only when order total is at most INR 5000). Payment decline and payment gateway timeout are failure paths.
+
+Bill amount generation must correctly compute merchandise subtotal, apply discount, calculate GST per line at the product GST rate on the discounted line amount, add delivery charges (INR 49 if merchandise after discount is below INR 999, otherwise free; no GST on delivery), and show payable total. Incorrect total display is a critical failure.
+
+Place order leads to order confirmation. Inventory reservation failure is a critical external failure path.

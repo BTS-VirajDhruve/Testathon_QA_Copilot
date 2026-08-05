@@ -1,0 +1,58 @@
+[
+  {
+    "bug_id": "BUG-ECOM-003",
+    "title": "Payment gateway timeout double-charged customer",
+    "severity": "critical",
+    "affected_components": ["Payment Gateway Timeout", "Place Order", "Credit Debit Card"],
+    "graph_path": ["ShopEase Ecommerce", "Checkout", "Payment Methods", "Payment Gateway Timeout"],
+    "steps_to_reproduce": [
+      "Start Place Order with card payment",
+      "Simulate gateway timeout after authorization",
+      "Retry Place Order with same cart"
+    ],
+    "expected_result": "Single charge and at most one confirmed order via idempotent request ID.",
+    "actual_result": "Customer charged twice; two order IDs created."
+  },
+  {
+    "bug_id": "BUG-ECOM-011",
+    "title": "GST not recalculated after removing discount",
+    "severity": "high",
+    "affected_components": ["Remove Discount", "GST Calculation", "Payable Total"],
+    "graph_path": ["ShopEase Ecommerce", "Checkout", "Bill Amount Generation", "Incorrect Total Display"],
+    "steps_to_reproduce": [
+      "Add Classic Tee",
+      "Apply SAVE10",
+      "Remove Discount",
+      "Compare payable total to formula without discount"
+    ],
+    "expected_result": "Totals revert to undiscounted GST and delivery rules.",
+    "actual_result": "GST remained at discounted amount after promo removal."
+  },
+  {
+    "bug_id": "BUG-ECOM-018",
+    "title": "COD accepted above INR 5000 via client bypass",
+    "severity": "high",
+    "affected_components": ["Cash on Delivery", "Place Order"],
+    "graph_path": ["ShopEase Ecommerce", "Checkout", "Payment Methods", "Cash on Delivery"],
+    "steps_to_reproduce": [
+      "Build cart with payable total > 5000",
+      "Force COD selection via API without UI check",
+      "Call Place Order"
+    ],
+    "expected_result": "Server rejects COD when payable_total > 5000.",
+    "actual_result": "Order placed with COD above threshold."
+  },
+  {
+    "bug_id": "BUG-ECOM-021",
+    "title": "Promo stacking allowed SAVE10 + FLAT100",
+    "severity": "high",
+    "affected_components": ["Apply Discount", "Promo Stacking Rejected"],
+    "graph_path": ["ShopEase Ecommerce", "Checkout", "Apply Discount", "Promo Stacking Rejected"],
+    "steps_to_reproduce": [
+      "Apply SAVE10",
+      "Attempt to apply FLAT100 without removing first promo"
+    ],
+    "expected_result": "Second promo rejected; only one discount active.",
+    "actual_result": "Both discounts applied reducing taxable merchandise incorrectly."
+  }
+]

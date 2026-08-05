@@ -1,0 +1,48 @@
+{
+  "root": "ShopEase Ecommerce",
+  "description": "End-to-end shopping journey: auth, catalog, cart, discounts, billing, payment, and logout.",
+  "branches": [
+    {
+      "name": "Sign In",
+      "children": [
+        "Self Registration",
+        "Google OAuth",
+        "Email Password Login",
+        "Session Creation",
+        "Log Out"
+      ]
+    },
+    {
+      "name": "Product Catalog",
+      "children": [
+        "Browse Products",
+        "Product Selection",
+        "Classic Tee",
+        "Wireless Earbuds",
+        "Desk Lamp",
+        "Canvas Tote"
+      ]
+    },
+    {
+      "name": "Shopping Cart",
+      "children": [
+        "Add to Cart",
+        "Remove from Cart",
+        "Update Quantity",
+        "Empty Cart"
+      ]
+    },
+    {
+      "name": "Checkout",
+      "children": [
+        "Review Cart",
+        "Apply Discount",
+        "Billing Form",
+        "Payment Methods",
+        "Bill Amount Generation",
+        "Place Order",
+        "Order Confirmation"
+      ]
+    }
+  ]
+}

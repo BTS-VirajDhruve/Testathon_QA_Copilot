@@ -59,6 +59,9 @@ body {
   .btn-brass {
     @apply btn bg-brass-500 text-white hover:bg-brass-600;
   }
+  .btn-danger {
+    @apply btn bg-signal-high text-white hover:bg-[#9a3f34];
+  }
   .label {
     @apply text-[11px] uppercase tracking-[0.16em] text-ink-600/70;
   }

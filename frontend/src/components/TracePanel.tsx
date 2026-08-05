@@ -13,6 +13,11 @@ const STATUS_STYLES: Record<string, string> = {
 /** Map real orchestrator step names to demo-friendly labels without inventing events. */
 function friendlyLabel(step: string): string {
   const s = step.toLowerCase();
+  if (s.includes("model routing") || s.includes("model selection")) return "Model Routing";
+  if (s.includes("complexity")) return "Complexity Assessment";
+  if (s.includes("model escalation") || s.includes("escalation")) return "Model Escalation";
+  if (s.includes("reviewer decision")) return "Reviewer Decision";
+  if (s.includes("reviewer pass")) return "Reviewer Pass";
   if (s.includes("classify intent") || s.includes("intent")) return "Intent Classification";
   if (s.includes("traverse user flow") || (s.includes("graph") && s.includes("path")))
     return "Graph Retrieval";
@@ -27,8 +32,31 @@ function friendlyLabel(step: string): string {
   if (s.includes("gap priorit")) return "Gap Prioritization";
   if (s.includes("targeted regeneration") || s.includes("targeted test"))
     return "Targeted Test Generation";
+  if (s.includes("coverage obligation")) return "Coverage Obligation Construction";
+  if (s.includes("suite review")) return "Suite Review";
+  if (s.includes("revision plan")) return "Revision Plan";
+  if (s.includes("test revision")) return "Test Revision";
+  if (s.includes("missing scenario")) return "Missing Scenario Generation";
+  if (s.includes("coverage recalculation")) return "Coverage Recalculation";
+  if (s.includes("convergence decision")) return "Convergence Decision";
+  if (s.includes("final validation")) return "Final Validation";
+  if (s.includes("coverage closure")) return "Coverage Closure";
   if (s.includes("dedup")) return "Deduplication";
   if (s.includes("final coverage")) return "Final Coverage";
+  if (s.includes("quality pre-check") || s.includes("test quality")) return "Test Quality Pre-check";
+  if (s.includes("automation feasibility") || s.includes("test review and automation"))
+    return "Test Review and Automation Feasibility";
+  if (s.includes("automation layer")) return "Automation Layer Recommendation";
+  if (s.includes("test review validation")) return "Test Review Validation";
+  if (s.includes("automation summary")) return "Automation Summary Aggregation";
+  if (s.includes("test format selection") || s.includes("format selection")) return "Test Format Selection";
+  if (s.includes("canonical test")) return "Canonical Test Generation";
+  if (s.includes("standard test rendering")) return "Standard Test Rendering";
+  if (s.includes("bdd scenario rendering") || s.includes("bdd rendering")) return "BDD Scenario Rendering";
+  if (s.includes("bdd validation")) return "BDD Validation";
+  if (s.includes("targeted bdd")) return "Targeted BDD Generation";
+  if (s.includes("test format persistence") || s.includes("format persistence")) return "Test Format Persistence";
+  if (s.includes("reuse persisted")) return "Reuse Persisted Tests";
   return step;
 }
 
@@ -42,7 +70,7 @@ export function TracePanel({ result }: { result: QACopilotResponse | null }) {
         invented for the demo.
       </p>
       {!result ? (
-        <p className="mt-4 text-sm text-ink-600/70">Run a copilot query to see the agent trace.</p>
+        <p className="mt-4 text-sm text-ink-600/70">No analysis run for this project.</p>
       ) : (
         <ol className="mt-5 space-y-2">
           {(result.execution_trace || []).map((step, idx) => {

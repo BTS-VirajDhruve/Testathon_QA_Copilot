@@ -1,4 +1,4 @@
-"""Vector store using Chroma when available, otherwise numpy cosine search."""
+﻿"""Vector store using Chroma when available, otherwise numpy cosine search."""
 
 from __future__ import annotations
 
@@ -121,16 +121,36 @@ class VectorStore:
         logger.info("vector_upserted", count=count)
         return count
 
-    def search(self, project_id: str, query: str, *, top_k: int = 8) -> list[dict[str, Any]]:
+    def search(
+        self,
+        project_id: str,
+        query: str,
+        *,
+        top_k: int = 8,
+        document_type: str | None = None,
+        feature: str | None = None,
+        source_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not query.strip():
             return []
         query_emb = self.openai.embed_one(query)
+        where: dict[str, Any] = {"project_id": project_id}
+        extra_filters: list[dict[str, Any]] = []
+        if document_type:
+            extra_filters.append({"document_type": document_type})
+        if feature:
+            extra_filters.append({"feature": feature})
+        if source_type:
+            extra_filters.append({"source_type": source_type})
+        if extra_filters:
+            where = {"$and": [{"project_id": project_id}, *extra_filters]}
+
         if self._collection is not None:
             try:
                 result = self._collection.query(
                     query_embeddings=[query_emb],
                     n_results=top_k,
-                    where={"project_id": project_id},
+                    where=where,
                 )
                 hits: list[dict[str, Any]] = []
                 docs = (result.get("documents") or [[]])[0]
@@ -140,6 +160,8 @@ class VectorStore:
                 for i, doc in enumerate(docs):
                     dist = dists[i] if i < len(dists) else 1.0
                     meta = metas[i] if i < len(metas) else {}
+                    if (meta or {}).get("project_id") and (meta or {}).get("project_id") != project_id:
+                        continue
                     hits.append(
                         {
                             "id": ids[i] if i < len(ids) else "",
@@ -148,7 +170,8 @@ class VectorStore:
                             "score": round(1.0 - float(dist), 4),
                             "source_reference": (meta or {}).get("source_reference"),
                             "document_id": (meta or {}).get("document_id"),
-                            "source_type": "requirement",
+                            "project_id": (meta or {}).get("project_id") or project_id,
+                            "source_type": (meta or {}).get("source_type") or "requirement",
                         }
                     )
                 return hits
@@ -159,6 +182,13 @@ class VectorStore:
         for item in self._fallback["items"]:
             if item.get("project_id") != project_id:
                 continue
+            meta = item.get("metadata") or {}
+            if document_type and str(meta.get("document_type", "")) != document_type:
+                continue
+            if feature and str(meta.get("feature", "")) != feature:
+                continue
+            if source_type and str(meta.get("source_type", item.get("source_type", ""))) != source_type:
+                continue
             score = self.openai.cosine_similarity(query_emb, item.get("embedding") or [])
             scored.append(
                 (
@@ -166,17 +196,79 @@ class VectorStore:
                     {
                         "id": item["id"],
                         "content": item["content"],
-                        "metadata": item.get("metadata") or {},
+                        "metadata": meta,
                         "score": round(score, 4),
                         "source_reference": item.get("source_reference"),
                         "document_id": item.get("document_id")
-                        or (item.get("metadata") or {}).get("document_id"),
-                        "source_type": "requirement",
+                        or meta.get("document_id"),
+                        "project_id": project_id,
+                        "source_type": meta.get("source_type") or "requirement",
                     },
                 )
             )
         scored.sort(key=lambda x: x[0], reverse=True)
         return [h for _, h in scored[:top_k]]
+
+    def delete_by_project(self, project_id: str) -> int:
+        """Delete all embeddings whose metadata project_id matches. Returns count removed."""
+        removed = 0
+        if self._collection is not None:
+            try:
+                existing = self._collection.get(where={"project_id": project_id})
+                ids = list(existing.get("ids") or [])
+                if ids:
+                    self._collection.delete(ids=ids)
+                    removed = len(ids)
+                else:
+                    try:
+                        self._collection.delete(where={"project_id": project_id})
+                    except Exception:  # noqa: BLE001
+                        pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("chroma_project_delete_failed", project_id=project_id, error=str(exc))
+                try:
+                    self._collection.delete(where={"project_id": project_id})
+                except Exception as exc2:  # noqa: BLE001
+                    logger.warning("chroma_project_delete_where_failed", error=str(exc2))
+
+        before = len(self._fallback.get("items") or [])
+        self._fallback["items"] = [
+            item
+            for item in (self._fallback.get("items") or [])
+            if item.get("project_id") != project_id
+        ]
+        fallback_removed = before - len(self._fallback["items"])
+        if fallback_removed:
+            self._save_fallback()
+            if self._collection is None:
+                removed = fallback_removed
+            else:
+                removed = max(removed, fallback_removed)
+
+        logger.info("vector_project_deleted", project_id=project_id, removed=removed)
+        return removed
+
+    def delete_ids(self, ids: list[str]) -> int:
+        if not ids:
+            return 0
+        removed = 0
+        if self._collection is not None:
+            try:
+                self._collection.delete(ids=list(ids))
+                removed = len(ids)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("chroma_delete_ids_failed", error=str(exc))
+        before = len(self._fallback.get("items") or [])
+        id_set = set(ids)
+        self._fallback["items"] = [
+            item for item in (self._fallback.get("items") or []) if item.get("id") not in id_set
+        ]
+        fallback_removed = before - len(self._fallback["items"])
+        if fallback_removed:
+            self._save_fallback()
+            if self._collection is None:
+                removed = fallback_removed
+        return removed
 
 
 _vector_store: VectorStore | None = None

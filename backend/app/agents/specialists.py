@@ -15,7 +15,7 @@ from app.agents.evidence import (
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
 from app.graph.traversal import get_coverage_engine, get_traversal
-from app.models.enums import ConfidenceLevel, Priority, RiskLevel
+from app.models.enums import ConfidenceLevel, LLMTaskType, Priority, RiskLevel
 from app.models.schemas import (
     BugReport,
     CoverageGap,
@@ -27,6 +27,11 @@ from app.models.schemas import (
     RegressionRecommendation,
     TestCase,
     new_id,
+)
+from app.services.model_router import (
+    ModelRoutingContext,
+    build_routing_context_from_fused,
+    decide_reviewer,
 )
 from app.services.openai_service import get_openai_service
 
@@ -110,18 +115,40 @@ Rules:
 3. Include historical-bug regression scenarios when bugs are provided.
 4. Include risk-focused scenarios when risk context is present.
 5. Prefer uncovered or weakly covered graph paths when existing tests are listed.
-   When existing coverage already leaves high-risk failure leaves (e.g. SSO Timeout,
-   Account Lockout) uncovered, you may leave 1–2 of those for a follow-up critic pass
-   rather than exhausting every leaf in the first response.
-6. Do NOT invent unsupported product behavior.
-7. Do NOT duplicate existing tests by title or graph path when avoidable.
-8. Mark assumptions explicitly in assumptions[].
-9. Preserve graph_path traceability using labels from DISCOVERED GRAPH PATHS whenever possible.
-10. Use only information present in the context sections. If a section is empty/unavailable, do not fabricate it.
-11. For evidence: ONLY cite source_id values that appear in the provided context. Never invent IDs.
-12. If exact evidence is unavailable, omit evidence entries or leave source_id null — do not invent sources.
-13. Provide reasoning explaining why the test exists based on retrieved context.
+   Exhaust high-risk failure leaves in this first pass when the graph includes them —
+   do not leave critical uncovered leaves for a later critic pass.
+6. Generate at least {min_cases} distinct scenarios when the fused context supports that many
+   (positive, negative, alternate, failure, and regression when bugs exist). If evidence is
+   thinner, generate as many distinct evidence-backed scenarios as possible without inventing
+   unsupported product behavior.
+7. Do NOT invent unsupported product behavior.
+8. Do NOT duplicate existing tests by title or graph path when avoidable.
+9. Mark assumptions explicitly in assumptions[].
+10. Preserve graph_path traceability using labels from DISCOVERED GRAPH PATHS whenever possible.
+11. Use only information present in the context sections. If a section is empty/unavailable, do not fabricate it.
+12. For evidence: ONLY cite source_id values that appear in the provided context. Never invent IDs.
+13. If exact evidence is unavailable, omit evidence entries or leave source_id null — do not invent sources.
+14. Provide reasoning explaining why the test exists based on retrieved context.
+15. Write titles as business Scenario names (e.g. "Create a journey with name, description and settings"),
+    not UI click scripts.
+16. Write preconditions as observable states (Given-ready), steps as user/system actions (When-ready),
+    and expected_result as machine-checkable outcomes that include concrete assertion language
+    (status, error, message, created, visible, returned, persisted, validation, etc.).
+17. Use category "negative" for validation/rejection/access-denied cases; "functional" or "regression"
+    for happy-path and structural behaviors; "security"/"performance"/etc. for non-functional qualities
+    only when context supports them.
+18. Prefer declarative wording ("the admin creates a journey named X") over procedural
+    ("click Save", "type into field").
+19. Cover positive, negative, alternate, boundary, failure, and non-functional scenarios only when
+    the fused context supports them — do not force every category into every feature.
 """
+
+    @classmethod
+    def _system_prompt(cls) -> str:
+        from app.core.config import get_settings
+
+        min_cases = max(1, int(get_settings().test_generation_min_cases))
+        return cls.SYSTEM_PROMPT.replace("{min_cases}", str(min_cases))
 
     TARGETED_SYSTEM_PROMPT = """You are a senior QA automation architect.
 Generate a test case specifically for this coverage gap.
@@ -159,22 +186,41 @@ Return JSON only with this shape:
 
 Rules:
 1. Generate ONLY test case(s) that close the provided coverage gap — do NOT regenerate the full suite.
-2. Prefer 1 focused test case; at most 2 if the gap clearly requires positive+negative pairs.
+2. Prefer 1–3 focused test cases when the gap clearly spans positive, negative, or alternate variants.
 3. Use the provided graph path, nodes, relationships, requirements, bugs, and evidence catalog.
 4. Do NOT invent unsupported product behavior.
 5. Do NOT duplicate existing tests listed in the context (by title, steps, expected result, or graph path).
 6. For evidence: ONLY cite source_id values from allowed_evidence_catalog. Never invent IDs.
 7. Reasoning MUST explain: This test was generated to close coverage gap: <gap>.
 8. Preserve graph_path traceability using labels from the gap / discovered paths.
+9. Write titles as business Scenario names; steps/expected results should convert cleanly to
+   Given/When/Then with declarative wording (avoid click/type scripts). Include machine-checkable
+   expected results (status, error, message, created, visible, returned, persisted, validation).
+10. Use category "negative" for rejection/validation/access failures; otherwise functional/regression.
 """
 
-    def generate(self, query: str, fused: FusedContext, project_id: str) -> list[TestCase]:
+    def generate(
+        self,
+        query: str,
+        fused: FusedContext,
+        project_id: str,
+        *,
+        routing_context: ModelRoutingContext | None = None,
+        user_intent: str | None = None,
+    ) -> list[TestCase]:
         openai = get_openai_service()
         cases: list[TestCase] = []
         method = "deterministic_fallback"
+        ctx = routing_context or build_routing_context_from_fused(
+            project_id=project_id,
+            task_type=LLMTaskType.TEST_CASE_GENERATION,
+            query=query,
+            user_intent=user_intent,
+            fused=fused,
+        )
 
         if openai.available:
-            llm_cases = self._generate_with_llm(query, fused, project_id, openai)
+            llm_cases = self._generate_with_llm(query, fused, project_id, openai, routing_context=ctx)
             if llm_cases:
                 cases = llm_cases
                 method = "llm"
@@ -218,7 +264,7 @@ Rules:
         # Persist lightly for coverage matching (baseline behavior)
         store = get_graph_store()
         for case in cases:
-            store.test_cases[case.test_case_id] = case.model_dump(mode="json")
+            store.upsert_test_case(project_id, case.model_dump(mode="json"))
         store.persist()
         return cases
 
@@ -404,6 +450,9 @@ Rules:
         fused: FusedContext,
         project_id: str,
         existing_tests: list[TestCase],
+        *,
+        routing_context: ModelRoutingContext | None = None,
+        user_intent: str | None = None,
     ) -> list[TestCase]:
         """Generate only the missing test(s) for one prioritized coverage gap.
 
@@ -412,9 +461,22 @@ Rules:
         """
         openai = get_openai_service()
         cases: list[TestCase] = []
+        ctx = routing_context or build_routing_context_from_fused(
+            project_id=project_id,
+            task_type=LLMTaskType.TARGETED_TEST_GENERATION,
+            query=gap.title,
+            user_intent=user_intent,
+            fused=fused,
+        )
+        # Critical gaps inherit security/release sensitivity from gap risk when present
+        if str(getattr(gap, "risk", "")).lower() in {"critical", "high"}:
+            ctx.security_sensitive = ctx.security_sensitive or "security" in (gap.title or "").lower()
+            ctx.release_blocking = ctx.release_blocking or str(getattr(gap, "risk", "")).lower() == "critical"
 
         if openai.available:
-            llm_cases = self._generate_targeted_with_llm(gap, fused, project_id, existing_tests, openai)
+            llm_cases = self._generate_targeted_with_llm(
+                gap, fused, project_id, existing_tests, openai, routing_context=ctx
+            )
             if llm_cases:
                 cases = llm_cases
                 logger.info("targeted_llm_success", gap_id=gap.gap_id, count=len(cases))
@@ -470,7 +532,7 @@ Rules:
         # Persist lightly for coverage matching
         store = get_graph_store()
         for case in cases:
-            store.test_cases[case.test_case_id] = case.model_dump(mode="json")
+            store.upsert_test_case(project_id, case.model_dump(mode="json"))
         if cases:
             store.persist()
         return cases
@@ -482,16 +544,26 @@ Rules:
         project_id: str,
         existing_tests: list[TestCase],
         openai: Any,
+        *,
+        routing_context: ModelRoutingContext | None = None,
     ) -> list[TestCase]:
         context = self.build_targeted_context(gap, fused, existing_tests)
         user_prompt = (
             "Generate a test case specifically for this coverage gap.\n\n"
             f"{json.dumps(context, indent=2, default=str)}"
         )
+        ctx = routing_context or build_routing_context_from_fused(
+            project_id=project_id,
+            task_type=LLMTaskType.TARGETED_TEST_GENERATION,
+            query=gap.title,
+            fused=fused,
+        )
         last_error: str | None = None
         for attempt in range(1, self.MAX_LLM_ATTEMPTS + 1):
             try:
                 repair_hint = ""
+                task = LLMTaskType.TARGETED_TEST_GENERATION
+                call_ctx = ctx
                 if attempt > 1:
                     repair_hint = (
                         "\n\nPrevious output was invalid or empty. "
@@ -499,11 +571,20 @@ Rules:
                         "matching the required schema exactly. "
                         "Generate only for the stated coverage gap."
                     )
+                    task = LLMTaskType.OUTPUT_REPAIR
+                    call_ctx = ctx.model_copy(
+                        update={
+                            "task_type": LLMTaskType.OUTPUT_REPAIR,
+                            "initial_validation_failed": True,
+                        }
+                    )
                 data = openai.chat_json(
                     self.TARGETED_SYSTEM_PROMPT,
                     user_prompt + repair_hint,
                     temperature=0.2,
                     strict=True,
+                    task_type=task,
+                    routing_context=call_ctx,
                 )
                 cases = self._parse_and_validate_cases(
                     data,
@@ -513,8 +594,10 @@ Rules:
                     id_offset=len(existing_tests),
                 )
                 if cases:
-                    # Cap at 2 per gap
-                    return cases[:2]
+                    from app.core.config import get_settings
+
+                    max_per = max(1, int(get_settings().test_generation_max_per_gap))
+                    return cases[:max_per]
                 last_error = "empty_or_unusable_test_cases"
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
@@ -639,28 +722,47 @@ Rules:
         fused: FusedContext,
         project_id: str,
         openai: Any,
+        *,
+        routing_context: ModelRoutingContext | None = None,
     ) -> list[TestCase]:
         context = self.build_llm_context(query, fused)
         user_prompt = (
             "Generate structured QA test cases from this fused context.\n\n"
             f"{json.dumps(context, indent=2, default=str)}"
         )
+        ctx = routing_context or build_routing_context_from_fused(
+            project_id=project_id,
+            task_type=LLMTaskType.TEST_CASE_GENERATION,
+            query=query,
+            fused=fused,
+        )
 
         last_error: str | None = None
         for attempt in range(1, self.MAX_LLM_ATTEMPTS + 1):
             try:
                 repair_hint = ""
+                task = LLMTaskType.TEST_CASE_GENERATION
+                call_ctx = ctx
                 if attempt > 1:
                     repair_hint = (
                         "\n\nPrevious output was invalid or empty. "
                         "Return a valid JSON object with a non-empty test_cases array "
                         "matching the required schema exactly."
                     )
+                    task = LLMTaskType.OUTPUT_REPAIR
+                    call_ctx = ctx.model_copy(
+                        update={
+                            "task_type": LLMTaskType.OUTPUT_REPAIR,
+                            "initial_validation_failed": True,
+                        }
+                    )
                 data = openai.chat_json(
-                    self.SYSTEM_PROMPT,
+                    self._system_prompt(),
                     user_prompt + repair_hint,
                     temperature=0.2,
                     strict=True,
+                    task_type=task,
+                    routing_context=call_ctx,
                 )
                 cases = self._parse_and_validate_cases(data, project_id, fused)
                 if cases:
@@ -763,9 +865,7 @@ Rules:
     ) -> list[TestCase]:
         """Baseline graph-path heuristic generator (fallback).
 
-        Reserves a small set of high-risk uncovered leaf paths (e.g. SSO Timeout)
-        for the critic-targeted regeneration loop so the demo shows
-        Initial → Gaps → Targeted → Final instead of exhausting all paths upfront.
+        Emits one test per discovered flow path leaf (no reserved uncovered leaves).
         """
         _ = query  # reserved for parity with LLM signature / future filters
         cases: list[TestCase] = []
@@ -787,26 +887,10 @@ Rules:
         if not paths and fused.feature_context.get("branches"):
             paths = [[feature, b] for b in fused.feature_context["branches"]]
 
-        # Leaves intentionally left for critic-targeted regeneration when uncovered
-        reserved_leaves = {"sso timeout", "account lockout"}
-        deferred: list[list[str]] = []
         catalog = build_evidence_catalog(fused)
         emit_idx = 0
         for path in paths:
             path_list = list(path) if not isinstance(path, list) else path
-            leaf = (path_list[-1] if path_list else "").lower()
-            leaf_covered = leaf in existing_tokens if leaf else True
-            if (
-                leaf in reserved_leaves
-                and not leaf_covered
-                and len(deferred) < 2
-            ):
-                deferred.append(path_list)
-                logger.info(
-                    "deterministic_path_reserved_for_targeted",
-                    path=" → ".join(path_list),
-                )
-                continue
 
             emit_idx += 1
             meta = path_meta.get(tuple(path_list), {})
@@ -823,7 +907,7 @@ Rules:
                 + (
                     "Path includes an external dependency boundary."
                     if external
-                    else "Path represents a user-reachable authentication journey."
+                    else "Path represents a user-reachable journey in the system flow graph."
                 )
                 + (" Failure/negative behavior is in scope." if is_failure else "")
             )
@@ -840,7 +924,7 @@ Rules:
                     risk=risk,
                     preconditions=[
                         f"Project system flow includes path: {' → '.join(path_list)}",
-                        "Test environment mirrors production auth configuration.",
+                        "Test environment mirrors the target system configuration.",
                     ],
                     test_data=self._test_data(path_list, is_failure),
                     steps=self._steps(path_list, is_failure),
@@ -862,12 +946,6 @@ Rules:
                     feature_id=fused.feature_context.get("id"),
                     generation_method="deterministic_fallback",
                 )
-            )
-        if deferred:
-            logger.info(
-                "deterministic_reserved_paths",
-                count=len(deferred),
-                paths=[" → ".join(p) for p in deferred],
             )
         return cases
 
@@ -908,11 +986,12 @@ Rules:
         if is_failure:
             return (
                 f"System handles failure on path {' → '.join(path)} without crashing, "
-                "with clear user feedback and no insecure session creation."
+                "surfaces a clear error message or validation status, and does not create "
+                "an insecure session."
             )
         return (
-            f"User successfully completes {' → '.join(path)} and reaches the intended "
-            "authenticated/application state."
+            f"User successfully completes {' → '.join(path)}; a success status or confirmation "
+            "message is displayed or returned and the intended application state is persisted."
         )
 
 
@@ -969,11 +1048,29 @@ class ExploratoryAgent:
 
 
 class BugReportAgent:
-    def generate(self, query: str, fused: FusedContext) -> list[BugReport]:
-        # Prefer historical patterns + likely failure paths
+    def generate(
+        self,
+        query: str,
+        fused: FusedContext,
+        *,
+        coverage: CoverageGapResult | None = None,
+    ) -> list[BugReport]:
+        """Produce historical + candidate defect reports from graph/risk evidence.
+
+        Never invents confirmed production bugs — candidates are labeled explicitly.
+        """
         reports: list[BugReport] = []
-        for bug in fused.historical_risks[:5]:
-            reports.append(
+        seen_titles: set[str] = set()
+
+        def _add(report: BugReport) -> None:
+            key = " ".join(report.title.split()).casefold()
+            if not key or key in seen_titles:
+                return
+            seen_titles.add(key)
+            reports.append(report)
+
+        for bug in fused.historical_risks[:8]:
+            _add(
                 BugReport(
                     bug_id=bug.get("bug_id") or new_id("BUG"),
                     title=bug.get("title") or "Historical defect pattern",
@@ -991,23 +1088,108 @@ class BugReportAgent:
                     or (fused.flow_paths[0] if fused.flow_paths else []),
                     affected_components=bug.get("affected_components") or [],
                     source_references=[bug.get("bug_id") or "historical_bugs"],
+                    classification="historical",
+                    generation_method="deterministic_fallback",
+                    business_impact="Prior breakage on this path may recur without regression coverage.",
                 )
             )
-        if not reports:
-            failure_paths = [p for p in fused.flow_paths if any("fail" in x.lower() or "lock" in x.lower() or "invalid" in x.lower() for x in p)]
-            for path in failure_paths[:3]:
-                reports.append(
+
+        failure_tokens = (
+            "fail",
+            "lock",
+            "invalid",
+            "timeout",
+            "decline",
+            "error",
+            "reject",
+            "duplicate",
+            "mismatch",
+            "rollback",
+            "missing",
+            "broken",
+        )
+        failure_paths = [
+            p
+            for p in fused.flow_paths
+            if any(any(tok in x.lower() for tok in failure_tokens) for x in p)
+        ]
+        for path in failure_paths[:6]:
+            _add(
+                BugReport(
+                    title=f"Candidate defect: {' → '.join(path)}",
+                    severity=RiskLevel.HIGH,
+                    steps_to_reproduce=[
+                        f"Navigate path {' → '.join(path)}",
+                        "Force the failure / negative condition at the terminal step.",
+                        "Observe error handling, data integrity, and recovery.",
+                    ],
+                    expected_result="Controlled failure handling with consistent state and clear user messaging.",
+                    actual_result="(Candidate) Observe and document any state corruption, silent failure, or unrecoverable error.",
+                    graph_path=path,
+                    affected_components=path[-2:] if len(path) >= 2 else path,
+                    source_references=["User-provided system flow graph"],
+                    classification="candidate",
+                    generation_method="deterministic_fallback",
+                    business_impact="Failure-path defects can block completion or corrupt downstream state.",
+                    missing_information="Confirmed production occurrence not verified from project knowledge.",
+                )
+            )
+
+        # Critical coverage gaps → candidate defects
+        gap_texts = list((coverage.critical_gaps if coverage else []) or [])
+        for gap in gap_texts[:6]:
+            _add(
+                BugReport(
+                    title=f"Candidate risk from coverage gap: {gap}",
+                    severity=RiskLevel.HIGH
+                    if "failure" in gap.lower() or "external" in gap.lower()
+                    else RiskLevel.MEDIUM,
+                    steps_to_reproduce=[
+                        f"Design a negative/path test targeting: {gap}",
+                        "Execute against current build and capture residuals.",
+                    ],
+                    expected_result="Gap is covered by an automated or exploratory check with clear expected behavior.",
+                    actual_result="(Candidate) Gap currently uncovered — defect may escape detection.",
+                    graph_path=fused.flow_paths[0] if fused.flow_paths else [],
+                    source_references=["Coverage gap analysis", "User-provided system flow graph"],
+                    classification="candidate",
+                    generation_method="deterministic_fallback",
+                    business_impact="Uncovered critical paths increase release risk.",
+                    missing_information="No confirmed incident; derived from coverage/risk analysis only.",
+                )
+            )
+
+        # External dependencies from graph context
+        for item in fused.graph_context[:12]:
+            name = str(item.get("name") or "")
+            ntype = str(item.get("type") or "")
+            if not name:
+                continue
+            if item.get("is_external_dependency") or ntype in (
+                "ExternalDependency",
+                "ThirdPartyProvider",
+            ):
+                _add(
                     BugReport(
-                        title=f"Potential defect area: {' → '.join(path)}",
+                        title=f"Candidate integration defect: {name}",
                         severity=RiskLevel.HIGH,
-                        steps_to_reproduce=[f"Exercise failure path {' → '.join(path)}"],
-                        expected_result="Controlled failure handling",
-                        actual_result="(Template) Observe and document actual deviation",
-                        graph_path=path,
+                        steps_to_reproduce=[
+                            f"Invoke flows that depend on {name}",
+                            "Simulate timeout, decline, and partial response from the dependency.",
+                        ],
+                        expected_result="Graceful degradation, retries/idempotency, and clear user-facing errors.",
+                        actual_result="(Candidate) Observe orphaned transactions, duplicate side-effects, or stuck states.",
+                        graph_path=[fused.feature_context.get("name") or "Feature", name],
+                        affected_components=[name],
                         source_references=["User-provided system flow graph"],
+                        classification="candidate",
+                        generation_method="deterministic_fallback",
+                        business_impact=f"Failures in {name} can cascade into order/session/payment integrity issues.",
+                        missing_information="Not confirmed as a production bug without incident evidence.",
                     )
                 )
-        return reports
+
+        return reports[:12]
 
 
 class RegressionAgent:
@@ -1016,10 +1198,23 @@ class RegressionAgent:
         fused: FusedContext,
         impact: ImpactAnalysisResult | None,
         changed_node: str | None,
+        *,
+        coverage: CoverageGapResult | None = None,
+        generated_tests: list[TestCase] | None = None,
     ) -> list[RegressionRecommendation]:
+        """Recommend retests from impact, existing/generated tests, and high-risk graph areas."""
         recs: list[RegressionRecommendation] = []
-        changed = changed_node or (impact.changed_node if impact else None) or fused.feature_context.get("name")
-        # From existing tests intersecting impact
+        feature = fused.feature_context.get("name") or "Feature"
+        changed = (
+            changed_node
+            or (impact.changed_node if impact else None)
+            or feature
+        )
+
+        def _add(rec: RegressionRecommendation) -> None:
+            recs.append(rec)
+
+        # From existing tests intersecting impact / feature
         for tc in fused.existing_coverage:
             path = tc.get("graph_path") or []
             path_l = " ".join(str(p) for p in path).lower()
@@ -1028,47 +1223,162 @@ class RegressionAgent:
                 related = True
             if impact and any(n.lower() in path_l for n in impact.directly_impacted_nodes[:10]):
                 related = True
+            if not impact and feature and feature.lower() in path_l:
+                related = True
             if related:
-                recs.append(
+                _add(
                     RegressionRecommendation(
                         test_case_id=tc.get("test_case_id") or new_id("TC"),
                         title=tc.get("title") or "Regression candidate",
                         reason=(
-                            f"This test is recommended because it covers [{ ' → '.join(path) }], "
-                            f"which is connected to the changed node '{changed}'."
+                            f"Reuse existing coverage on [{' → '.join(str(p) for p in path)}] "
+                            f"because it intersects risk area '{changed}'."
                         ),
                         graph_path=list(path),
                         changed_node=changed,
                         priority=Priority.HIGH,
                         source_references=["Graph impact analysis", "Existing test catalog"],
+                        generation_method="deterministic_fallback",
                     )
                 )
-        # Also recommend path tests for direct neighbors
+
+        # Newly generated tests (complete analysis) — prioritize failure/high risk
+        for tc in generated_tests or []:
+            path = tc.graph_path or []
+            risk = (tc.risk.value if hasattr(tc.risk, "value") else str(tc.risk or "")).lower()
+            category = (tc.category or "").lower()
+            if risk in ("high", "critical") or "fail" in category or "negative" in category:
+                _add(
+                    RegressionRecommendation(
+                        test_case_id=tc.test_case_id,
+                        title=f"Retest: {tc.title}",
+                        reason=(
+                            f"Generated high-risk test should be retained in the regression pack "
+                            f"for '{changed}'."
+                        ),
+                        graph_path=list(path),
+                        changed_node=changed,
+                        priority=Priority.HIGH if risk != "critical" else Priority.CRITICAL,
+                        source_references=["Generated test suite", "User-provided system flow graph"],
+                        generation_method="deterministic_fallback",
+                    )
+                )
+
+        # Impact neighbors
         if impact:
             for name in impact.directly_impacted_nodes[:8]:
                 matching = [p for p in fused.flow_paths if name in p]
                 for path in matching[:1]:
-                    recs.append(
+                    _add(
                         RegressionRecommendation(
                             test_case_id=new_id("TC"),
                             title=f"Retest path through {name}",
                             reason=(
-                                f"This test is recommended because it covers [{' → '.join(path)}], "
-                                f"which is connected to the changed node '{impact.changed_node}'."
+                                f"Direct impact from '{impact.changed_node}' reaches "
+                                f"[{' → '.join(path)}]."
                             ),
                             graph_path=path,
                             changed_node=impact.changed_node,
                             priority=Priority.HIGH,
                             source_references=["User-provided system flow graph", "Impact analysis"],
+                            generation_method="deterministic_fallback",
                         )
                     )
+            for name in impact.indirectly_impacted_nodes[:4]:
+                matching = [p for p in fused.flow_paths if name in p]
+                for path in matching[:1]:
+                    _add(
+                        RegressionRecommendation(
+                            test_case_id=new_id("TC"),
+                            title=f"Smoke path through {name}",
+                            reason=(
+                                f"Indirect impact from '{impact.changed_node}' may affect "
+                                f"[{' → '.join(path)}]."
+                            ),
+                            graph_path=path,
+                            changed_node=impact.changed_node,
+                            priority=Priority.MEDIUM,
+                            source_references=["User-provided system flow graph", "Impact analysis"],
+                            generation_method="deterministic_fallback",
+                        )
+                    )
+
+        # No impact / sparse existing tests — derive from high-risk flow paths & gaps
+        if len(recs) < 4:
+            risk_tokens = (
+                "payment",
+                "gateway",
+                "inventory",
+                "shipping",
+                "coupon",
+                "discount",
+                "retry",
+                "idempoten",
+                "timeout",
+                "external",
+                "oauth",
+                "fail",
+                "validat",
+                "copy",
+                "duplicate",
+                "language",
+                "preview",
+                "collection",
+                "folder",
+            )
+            for path in fused.flow_paths:
+                blob = " ".join(path).lower()
+                if any(tok in blob for tok in risk_tokens):
+                    _add(
+                        RegressionRecommendation(
+                            test_case_id=new_id("TC"),
+                            title=f"Regression path: {' → '.join(path[-3:])}",
+                            reason=(
+                                f"High-risk path under '{changed}' should be retested when the "
+                                f"feature or its dependencies change."
+                            ),
+                            graph_path=path,
+                            changed_node=changed,
+                            priority=Priority.HIGH,
+                            source_references=["User-provided system flow graph", "Risk analysis"],
+                            generation_method="deterministic_fallback",
+                        )
+                    )
+                if len(recs) >= 12:
+                    break
+        if coverage:
+            for gap in (coverage.critical_gaps or [])[:5]:
+                _add(
+                    RegressionRecommendation(
+                        test_case_id=new_id("TC"),
+                        title=f"Close gap in regression pack: {gap}",
+                        reason=f"Critical uncovered area remains for '{changed}': {gap}.",
+                        graph_path=fused.flow_paths[0] if fused.flow_paths else [changed],
+                        changed_node=changed,
+                        priority=Priority.HIGH,
+                        source_references=["Coverage gap analysis"],
+                        generation_method="deterministic_fallback",
+                    )
+                )
+
+        # Related bugs
+        bug_refs = [
+            str(b.get("bug_id") or b.get("title"))
+            for b in fused.historical_risks[:5]
+            if b.get("bug_id") or b.get("title")
+        ]
+        for rec in recs:
+            if not rec.related_bug_references and bug_refs:
+                rec.related_bug_references = bug_refs[:3]
+
         # Dedupe by title
         seen: set[str] = set()
         out: list[RegressionRecommendation] = []
         for r in recs:
-            if r.title in seen:
+            key = " ".join(r.title.split()).casefold()
+            if key in seen:
                 continue
-            seen.add(r.title)
+            seen.add(key)
             out.append(r)
         return out[:20]
 
@@ -1120,11 +1430,15 @@ class CriticAgent:
                     build_coverage_gaps,
                     select_gaps_for_regeneration,
                 )
+                from app.core.config import get_settings
 
                 structured = build_coverage_gaps(
                     coverage=coverage, fused=fused, test_cases=improved
                 )
-                selected = select_gaps_for_regeneration(structured, max_gaps=4)
+                selected = select_gaps_for_regeneration(
+                    structured,
+                    max_gaps=max(1, int(get_settings().test_generation_max_gaps_per_round)),
+                )
                 if selected:
                     agent = TestCaseAgent()
                     pid = project_id or fused.feature_context.get("project_id") or "project"
@@ -1161,6 +1475,13 @@ class CriticAgent:
                     "You are a QA critic. Review test cases for graph-path completeness. "
                     "Return JSON {notes:[], improvements:[]}.",
                     f"tests={[tc.title for tc in improved[:15]]}\ngaps={(coverage.critical_gaps if coverage else [])}",
+                    task_type=LLMTaskType.CRITIC_NOTES,
+                    routing_context=ModelRoutingContext(
+                        project_id=project_id,
+                        task_type=LLMTaskType.CRITIC_NOTES,
+                        selected_feature=fused.feature_context.get("name"),
+                        graph_path_count=len(fused.flow_paths or []),
+                    ),
                 )
                 notes.extend(data.get("notes") or [])
                 notes.extend([f"Improvement: {i}" for i in data.get("improvements") or []])
@@ -1172,6 +1493,83 @@ class CriticAgent:
                 "Critic review complete — path linkage and gap checks passed with no blocking issues."
             )
         return notes, improved
+
+
+def basic_test_quality_failed(test_cases: list[TestCase]) -> tuple[bool, list[str]]:
+    """Low-cost deterministic quality checks before optional high-tier reviewer."""
+    issues: list[str] = []
+    if not test_cases:
+        issues.append("no_test_cases")
+        return True, issues
+    for tc in test_cases[:20]:
+        if not (tc.title or "").strip():
+            issues.append(f"{tc.test_case_id}:missing_title")
+        if not tc.steps:
+            issues.append(f"{tc.test_case_id}:empty_steps")
+        if not (tc.expected_result or "").strip():
+            issues.append(f"{tc.test_case_id}:missing_expected_result")
+    return bool(issues), issues
+
+
+def run_premium_reviewer_pass(
+    *,
+    test_cases: list[TestCase],
+    fused: FusedContext,
+    project_id: str,
+    routing_context: ModelRoutingContext,
+    quality_issues: list[str],
+) -> tuple[list[str], list[TestCase]]:
+    """Optional expensive semantic review — at most one call; distinct from CriticAgent."""
+    decision = decide_reviewer(routing_context, quality_failed=bool(quality_issues))
+    if not decision.required:
+        return [], test_cases
+
+    openai = get_openai_service()
+    if not openai.available:
+        return [f"Reviewer skipped (OpenAI unavailable): {', '.join(decision.reasons)}"], test_cases
+
+    review_ctx = routing_context.model_copy(update={"task_type": LLMTaskType.REVIEWER_PASS})
+    payload = {
+        "reasons": decision.reasons,
+        "quality_issues": quality_issues[:20],
+        "feature": fused.feature_context,
+        "flow_paths": (fused.flow_paths or [])[:15],
+        "tests": [
+            {
+                "test_case_id": tc.test_case_id,
+                "title": tc.title,
+                "graph_path": tc.graph_path,
+                "steps": tc.steps[:8],
+                "expected_result": tc.expected_result,
+            }
+            for tc in test_cases[:12]
+        ],
+    }
+    try:
+        data = openai.chat_json(
+            "You are a senior QA reviewer. Review the generated tests for missing high-risk "
+            "scenarios and incomplete fields. Return JSON {notes:[], improvements:[], "
+            "revised_titles:[{test_case_id,title}]}. Do not invent evidence IDs.",
+            json.dumps(payload, indent=2, default=str),
+            temperature=0.1,
+            task_type=LLMTaskType.REVIEWER_PASS,
+            routing_context=review_ctx,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("premium_reviewer_failed", error=str(exc)[:200])
+        return [f"Reviewer pass failed: {str(exc)[:120]}"], test_cases
+
+    notes = [f"Reviewer: {n}" for n in (data.get("notes") or [])]
+    notes.extend([f"Reviewer improvement: {i}" for i in (data.get("improvements") or [])])
+    notes.append(f"Reviewer triggered ({', '.join(decision.reasons)})")
+
+    # Apply optional title corrections only — preserve structure/evidence
+    revised = {item.get("test_case_id"): item.get("title") for item in data.get("revised_titles") or []}
+    for tc in test_cases:
+        new_title = revised.get(tc.test_case_id)
+        if new_title and isinstance(new_title, str) and new_title.strip():
+            tc.title = new_title.strip()
+    return notes, test_cases
 
 
 class RiskAgent:

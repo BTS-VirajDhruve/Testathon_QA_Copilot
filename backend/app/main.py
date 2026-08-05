@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
+from app.api.atlassian_routes import router as atlassian_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 
@@ -58,8 +59,15 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "Content-Disposition",
+            "X-QA-Exported-Scenarios",
+            "X-QA-Exported-Files",
+            "X-QA-Analysis-Id",
+        ],
     )
     app.include_router(router, prefix="/api")
+    app.include_router(atlassian_router, prefix="/api")
     return app
 
 
