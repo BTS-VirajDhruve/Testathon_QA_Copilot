@@ -39,11 +39,19 @@ async def lifespan(_app: FastAPI):
     try:
         vs = get_vector_store()
         oa = get_openai_service()
+        chroma_diag = vs.diagnostics()
         logger.info(
             "runtime_diagnostics",
             openai_client_ready=oa.available,
             vector_store_mode=vs.backend_mode,
-            graph_store_mode=("neo4j+json" if settings.neo4j_enabled else "json"),
+            chroma_connected=vs.backend_mode == "chroma",
+            chroma_mode=chroma_diag.get("chroma_mode"),
+            chroma_host=chroma_diag.get("chroma_host"),
+            chroma_port=chroma_diag.get("chroma_port"),
+            chroma_collection=chroma_diag.get("chroma_collection"),
+            graph_store_mode=(
+                "neo4j+mongo" if settings.neo4j_enabled else "mongo"
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("runtime_diagnostics_failed", error=str(exc)[:200])
@@ -118,7 +126,9 @@ async def serve() -> None:
         proxy_headers=settings.uvicorn_proxy_headers,
         forwarded_allow_ips=settings.uvicorn_forwarded_allow_ips,
         timeout_keep_alive=settings.uvicorn_timeout_keep_alive_seconds,
-        timeout_graceful_shutdown=settings.uvicorn_timeout_graceful_shutdown_seconds,
+        timeout_graceful_shutdown=(
+            settings.uvicorn_timeout_graceful_shutdown_seconds
+        ),
     )
     logger.info(
         "server_starting",

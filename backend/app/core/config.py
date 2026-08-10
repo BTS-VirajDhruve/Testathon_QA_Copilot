@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
 
-    # Task-aware model routing (empty = use DEFAULT_TASK_MODEL_MAP / OPENAI_MODEL)
+    # Task-aware routing (empty = use DEFAULT_TASK_MODEL_MAP / OPENAI_MODEL)
     openai_model_intent_classification: str = ""
     openai_model_qa_documentation: str = ""
     openai_model_regression_selection: str = ""
@@ -73,7 +73,8 @@ class Settings(BaseSettings):
     test_generation_max_gaps_per_round: int = 8
     test_generation_max_regeneration_rounds: int = 2
 
-    # Atlassian Cloud (Jira + Confluence) — OAuth 2.0 3LO; secrets stay backend-only
+    # Atlassian Cloud (Jira + Confluence) — OAuth 2.0 3LO.
+    # Secrets stay backend-only.
     atlassian_integration_enabled: bool = True
     atlassian_oauth_client_id: str = ""
     atlassian_oauth_client_secret: str = ""
@@ -81,7 +82,8 @@ class Settings(BaseSettings):
         "http://localhost:8000/api/integrations/atlassian/callback"
     )
     atlassian_oauth_scopes: str = (
-        "read:jira-work read:space:confluence read:page:confluence offline_access"
+        "read:jira-work read:space:confluence "
+        "read:page:confluence offline_access"
     )
     atlassian_token_encryption_key: str = ""
     atlassian_request_timeout_seconds: float = 30.0
@@ -112,7 +114,7 @@ class Settings(BaseSettings):
     neo4j_enabled: bool = False
 
     # MongoDB
-    mongo_enabled: bool = False
+    mongo_enabled: bool = True
     mongo_required: bool = False
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db_name: str = "qa_copilot"
@@ -140,18 +142,33 @@ class Settings(BaseSettings):
     # Relative paths resolve against BACKEND_ROOT (not process cwd).
     data_dir: str = "./data"
     chroma_dir: str = "./data/chroma"
-    graph_store_path: str = "./data/graph_store.json"
+    chroma_tenant: str = "default_tenant"
+    chroma_database: str = "qa_copilot_chroma"
+    chroma_use_http: bool = False
+    chroma_host: str = "localhost"
+    chroma_port: int = 8001
+    chroma_ssl: bool = False
+    chroma_collection: str = "qa_copilot_docs"
     enable_demo_fallback: bool = True
 
     @model_validator(mode="after")
     def _resolve_data_paths(self) -> "Settings":
-        for field in ("data_dir", "chroma_dir", "graph_store_path"):
+        backend_root = BACKEND_ROOT.resolve()
+        for field in ("data_dir", "chroma_dir"):
             raw = getattr(self, field)
             path = Path(raw)
             if not path.is_absolute():
-                setattr(self, field, str((BACKEND_ROOT / path).resolve()))
+                resolved = (BACKEND_ROOT / path).resolve()
             else:
-                setattr(self, field, str(path.resolve()))
+                resolved = path.resolve()
+            if field == "chroma_dir":
+                try:
+                    resolved.relative_to(backend_root)
+                except ValueError as exc:
+                    raise ValueError(
+                        "chroma_dir must stay inside backend project directory",
+                    ) from exc
+            setattr(self, field, str(resolved))
         return self
 
     @property
@@ -208,11 +225,11 @@ class Settings(BaseSettings):
         if not self.is_development:
             if self.jwt_access_secret.strip() in insecure_secrets:
                 raise ValueError(
-                    "jwt_access_secret must be set to a secure value outside development",
+                    "jwt_access_secret must be secure outside development",
                 )
             if self.jwt_refresh_secret.strip() in insecure_secrets:
                 raise ValueError(
-                    "jwt_refresh_secret must be set to a secure value outside development",
+                    "jwt_refresh_secret must be secure outside development",
                 )
             if "*" in self.cors_origin_list:
                 raise ValueError(
@@ -223,7 +240,6 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         Path(self.data_dir).mkdir(parents=True, exist_ok=True)
         Path(self.chroma_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.graph_store_path).parent.mkdir(parents=True, exist_ok=True)
         self.atlassian_data_dir.mkdir(parents=True, exist_ok=True)
 
 

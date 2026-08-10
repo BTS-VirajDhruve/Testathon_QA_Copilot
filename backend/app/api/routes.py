@@ -19,9 +19,10 @@ from app.agents.bdd_export import (
 )
 from app.agents.orchestrator import get_orchestrator
 from app.api.auth_dependencies import require_admin_user
+from app.core.config import get_settings
 from app.db.mongo import mongo_health_signal
 from app.graph.ingestion import get_flow_ingester
-from app.graph.store import get_graph_store
+from app.graph.store import get_graph_store, get_neo4j_store
 from app.graph.traversal import get_coverage_engine, get_traversal
 from app.models.enums import Priority
 from app.models.schemas import (
@@ -36,6 +37,7 @@ from app.models.schemas import (
 )
 from app.rag.document_ingestion import get_document_ingester
 from app.rag.vector_store import get_vector_store
+from app.services.openai_service import get_openai_service
 
 router = APIRouter()
 
@@ -64,19 +66,14 @@ class NodeCreateBody(BaseModel):
 
 @router.get("/health")
 def health() -> dict[str, Any]:
-    from app.core.config import get_settings
-    from app.graph.store import get_graph_store, get_neo4j_store
-    from app.rag.vector_store import get_vector_store
-    from app.services.openai_service import get_openai_service
-
     settings = get_settings()
     openai = get_openai_service()
     vectors = get_vector_store()
     neo4j = get_neo4j_store()
     graph_mode = (
-        "neo4j+json"
+        "neo4j+mongo"
         if settings.neo4j_enabled and getattr(neo4j, "_driver", None) is not None
-        else "json"
+        else "mongo"
     )
     store = get_graph_store()
     atl_count = sum(
@@ -107,7 +104,7 @@ def health() -> dict[str, Any]:
         "graph_store_mode": graph_mode,
         "projects": len(store.list_projects()),
         "data_dir": settings.data_dir,
-        "graph_store_path": settings.graph_store_path,
+        "graph_store_path": None,
         "api_base_hint": "Use NEXT_PUBLIC_API_URL on the frontend",
         "atlassian_integration_enabled": settings.atlassian_integration_enabled,
         "atlassian_oauth_configured": settings.atlassian_oauth_configured,

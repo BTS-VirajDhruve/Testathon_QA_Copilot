@@ -1,8 +1,7 @@
-"""Vector store using Chroma when available, otherwise numpy cosine search."""
+"""Vector store using Chroma only."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,7 @@ from app.rag.document_ingestion import get_document_ingester
 from app.services.openai_service import get_openai_service
 
 logger = get_logger(__name__)
+CHROMA_TELEMETRY_IMPL = "app.rag.chroma_telemetry.NoOpTelemetry"
 
 
 class VectorStore:
@@ -22,54 +22,98 @@ class VectorStore:
         self.docs = get_document_ingester()
         self._chroma = None
         self._collection = None
-        self._fallback_path = Path(self.settings.data_dir) / "vector_index.json"
-        self._fallback: dict[str, Any] = {"items": []}
         self._init_chroma()
-        self._load_fallback()
 
     def _init_chroma(self) -> None:
         try:
             import chromadb
+            from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
             from chromadb.config import Settings as ChromaSettings
 
-            Path(self.settings.chroma_dir).mkdir(parents=True, exist_ok=True)
-            self._chroma = chromadb.PersistentClient(
-                path=self.settings.chroma_dir,
-                settings=ChromaSettings(anonymized_telemetry=False),
+            chroma_settings = ChromaSettings(
+                anonymized_telemetry=False,
+                chroma_product_telemetry_impl=CHROMA_TELEMETRY_IMPL,
+                chroma_telemetry_impl=CHROMA_TELEMETRY_IMPL,
             )
+            if self.settings.chroma_use_http:
+                self._chroma = chromadb.HttpClient(
+                    host=self.settings.chroma_host,
+                    port=self.settings.chroma_port,
+                    ssl=self.settings.chroma_ssl,
+                    tenant=DEFAULT_TENANT,
+                    database=DEFAULT_DATABASE,
+                    settings=chroma_settings,
+                )
+            else:
+                Path(self.settings.chroma_dir).mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+                self._chroma = chromadb.PersistentClient(
+                    path=self.settings.chroma_dir,
+                    tenant=DEFAULT_TENANT,
+                    database=DEFAULT_DATABASE,
+                    settings=chroma_settings,
+                )
+            self._ensure_chroma_namespace()
             self._collection = self._chroma.get_or_create_collection(
-                name="qa_copilot_docs",
+                name=self.settings.chroma_collection,
                 metadata={"hnsw:space": "cosine"},
             )
-            logger.info("chroma_initialized", path=self.settings.chroma_dir)
+            logger.info(
+                "chroma_initialized",
+                mode="http" if self.settings.chroma_use_http else "persistent",
+                path=self.settings.chroma_dir,
+                host=self.settings.chroma_host,
+                port=self.settings.chroma_port,
+                tenant=self.settings.chroma_tenant,
+                database=self.settings.chroma_database,
+                collection=self.settings.chroma_collection,
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("chroma_unavailable_using_json_index", error=str(exc))
-            self._chroma = None
-            self._collection = None
+            logger.error(
+                "chroma_initialization_failed",
+                error=str(exc)[:240],
+            )
+            raise RuntimeError("Chroma is required for vector storage") from exc
 
     @property
     def backend_mode(self) -> str:
-        return "chroma" if self._collection is not None else "json_fallback"
+        return "chroma"
+
+    def _ensure_chroma_namespace(self) -> None:
+        if self._chroma is None:
+            return
+        target_tenant = self.settings.chroma_tenant
+        target_database = self.settings.chroma_database
+        admin = getattr(self._chroma, "_admin_client", None)
+        if admin is not None:
+            try:
+                admin.get_tenant(name=target_tenant)
+            except Exception:  # noqa: BLE001
+                admin.create_tenant(name=target_tenant)
+            try:
+                admin.get_database(name=target_database, tenant=target_tenant)
+            except Exception:  # noqa: BLE001
+                admin.create_database(name=target_database, tenant=target_tenant)
+        self._chroma.set_tenant(target_tenant)
+        self._chroma.set_database(target_database)
 
     def diagnostics(self) -> dict[str, Any]:
         return {
             "vector_store_mode": self.backend_mode,
+            "chroma_mode": (
+                "http"
+                if self.settings.chroma_use_http
+                else "persistent"
+            ),
             "chroma_dir": self.settings.chroma_dir,
-            "fallback_index": str(self._fallback_path),
+            "chroma_host": self.settings.chroma_host,
+            "chroma_port": self.settings.chroma_port,
+            "chroma_tenant": self.settings.chroma_tenant,
+            "chroma_database": self.settings.chroma_database,
+            "chroma_collection": self.settings.chroma_collection,
         }
-
-    def _load_fallback(self) -> None:
-        if self._fallback_path.exists():
-            try:
-                self._fallback = json.loads(
-                    self._fallback_path.read_text(encoding="utf-8")
-                )
-            except Exception:  # noqa: BLE001
-                self._fallback = {"items": []}
-
-    def _save_fallback(self) -> None:
-        self._fallback_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fallback_path.write_text(json.dumps(self._fallback), encoding="utf-8")
 
     def index_project(self, project_id: str) -> int:
         chunks = self.docs.get_chunks(project_id)
@@ -81,46 +125,23 @@ class VectorStore:
         if not chunks:
             return 0
         embeddings = self.openai.embed([c.content for c in chunks])
-        count = 0
-        if self._collection is not None:
-            ids = [c.id for c in chunks]
-            # Idempotent upsert
-            self._collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=[c.content for c in chunks],
-                metadatas=[
-                    {
-                        "project_id": c.project_id,
-                        "document_id": c.document_id,
-                        "source_reference": c.source_reference or "",
-                        **{k: str(v) for k, v in c.metadata.items()},
-                    }
-                    for c in chunks
-                ],
-            )
-            count = len(chunks)
-        else:
-            existing_ids = {item["id"] for item in self._fallback["items"]}
-            for chunk, emb in zip(chunks, embeddings, strict=True):
-                item = {
-                    "id": chunk.id,
-                    "project_id": chunk.project_id,
-                    "document_id": chunk.document_id,
-                    "content": chunk.content,
-                    "embedding": emb,
-                    "source_reference": chunk.source_reference,
-                    "metadata": chunk.metadata,
+        ids = [c.id for c in chunks]
+        # Idempotent upsert
+        self._collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=[c.content for c in chunks],
+            metadatas=[
+                {
+                    "project_id": c.project_id,
+                    "document_id": c.document_id,
+                    "source_reference": c.source_reference or "",
+                    **{k: str(v) for k, v in c.metadata.items()},
                 }
-                if chunk.id in existing_ids:
-                    self._fallback["items"] = [
-                        item if i["id"] == chunk.id else i
-                        for i in self._fallback["items"]
-                    ]
-                else:
-                    self._fallback["items"].append(item)
-                count += 1
-            self._save_fallback()
+                for c in chunks
+            ],
+        )
+        count = len(chunks)
         logger.info("vector_upserted", count=count)
         return count
 
@@ -148,147 +169,55 @@ class VectorStore:
         if extra_filters:
             where = {"$and": [{"project_id": project_id}, *extra_filters]}
 
-        if self._collection is not None:
-            try:
-                result = self._collection.query(
-                    query_embeddings=[query_emb],
-                    n_results=top_k,
-                    where=where,
-                )
-                hits: list[dict[str, Any]] = []
-                docs = (result.get("documents") or [[]])[0]
-                metas = (result.get("metadatas") or [[]])[0]
-                dists = (result.get("distances") or [[]])[0]
-                ids = (result.get("ids") or [[]])[0]
-                for i, doc in enumerate(docs):
-                    dist = dists[i] if i < len(dists) else 1.0
-                    meta = metas[i] if i < len(metas) else {}
-                    if (meta or {}).get("project_id") and (meta or {}).get(
-                        "project_id"
-                    ) != project_id:
-                        continue
-                    hits.append(
-                        {
-                            "id": ids[i] if i < len(ids) else "",
-                            "content": doc,
-                            "metadata": meta,
-                            "score": round(1.0 - float(dist), 4),
-                            "source_reference": (meta or {}).get("source_reference"),
-                            "document_id": (meta or {}).get("document_id"),
-                            "project_id": (meta or {}).get("project_id") or project_id,
-                            "source_type": (meta or {}).get("source_type")
-                            or "requirement",
-                        }
-                    )
-                return hits
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("chroma_query_failed", error=str(exc))
-
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for item in self._fallback["items"]:
-            if item.get("project_id") != project_id:
+        result = self._collection.query(
+            query_embeddings=[query_emb],
+            n_results=top_k,
+            where=where,
+        )
+        hits: list[dict[str, Any]] = []
+        docs = (result.get("documents") or [[]])[0]
+        metas = (result.get("metadatas") or [[]])[0]
+        dists = (result.get("distances") or [[]])[0]
+        ids = (result.get("ids") or [[]])[0]
+        for i, doc in enumerate(docs):
+            dist = dists[i] if i < len(dists) else 1.0
+            meta = metas[i] if i < len(metas) else {}
+            if (meta or {}).get("project_id") and (meta or {}).get(
+                "project_id"
+            ) != project_id:
                 continue
-            meta = item.get("metadata") or {}
-            if document_type and str(meta.get("document_type", "")) != document_type:
-                continue
-            if feature and str(meta.get("feature", "")) != feature:
-                continue
-            if (
-                source_type
-                and str(meta.get("source_type", item.get("source_type", "")))
-                != source_type
-            ):
-                continue
-            score = self.openai.cosine_similarity(
-                query_emb, item.get("embedding") or []
+            hits.append(
+                {
+                    "id": ids[i] if i < len(ids) else "",
+                    "content": doc,
+                    "metadata": meta,
+                    "score": round(1.0 - float(dist), 4),
+                    "source_reference": (meta or {}).get("source_reference"),
+                    "document_id": (meta or {}).get("document_id"),
+                    "project_id": (meta or {}).get("project_id") or project_id,
+                    "source_type": (meta or {}).get("source_type") or "requirement",
+                }
             )
-            scored.append(
-                (
-                    score,
-                    {
-                        "id": item["id"],
-                        "content": item["content"],
-                        "metadata": meta,
-                        "score": round(score, 4),
-                        "source_reference": item.get("source_reference"),
-                        "document_id": item.get("document_id")
-                        or meta.get("document_id"),
-                        "project_id": project_id,
-                        "source_type": meta.get("source_type") or "requirement",
-                    },
-                )
-            )
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [h for _, h in scored[:top_k]]
+        return hits
 
     def delete_by_project(self, project_id: str) -> int:
         """Delete all embeddings whose metadata project_id matches. Returns count removed."""
         removed = 0
-        if self._collection is not None:
-            try:
-                existing = self._collection.get(where={"project_id": project_id})
-                ids = list(existing.get("ids") or [])
-                if ids:
-                    self._collection.delete(ids=ids)
-                    removed = len(ids)
-                else:
-                    try:
-                        self._collection.delete(where={"project_id": project_id})
-                    except Exception:  # noqa: BLE001
-                        pass
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "chroma_project_delete_failed",
-                    project_id=project_id,
-                    error=str(exc),
-                )
-                try:
-                    self._collection.delete(where={"project_id": project_id})
-                except Exception as exc2:  # noqa: BLE001
-                    logger.warning(
-                        "chroma_project_delete_where_failed", error=str(exc2)
-                    )
-
-        before = len(self._fallback.get("items") or [])
-        self._fallback["items"] = [
-            item
-            for item in (self._fallback.get("items") or [])
-            if item.get("project_id") != project_id
-        ]
-        fallback_removed = before - len(self._fallback["items"])
-        if fallback_removed:
-            self._save_fallback()
-            if self._collection is None:
-                removed = fallback_removed
-            else:
-                removed = max(removed, fallback_removed)
-
+        existing = self._collection.get(where={"project_id": project_id})
+        ids = list(existing.get("ids") or [])
+        if ids:
+            self._collection.delete(ids=ids)
+            removed = len(ids)
+        else:
+            self._collection.delete(where={"project_id": project_id})
         logger.info("vector_project_deleted", project_id=project_id, removed=removed)
         return removed
 
     def delete_ids(self, ids: list[str]) -> int:
         if not ids:
             return 0
-        removed = 0
-        if self._collection is not None:
-            try:
-                self._collection.delete(ids=list(ids))
-                removed = len(ids)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("chroma_delete_ids_failed", error=str(exc))
-        before = len(self._fallback.get("items") or [])
-        id_set = set(ids)
-        self._fallback["items"] = [
-            item
-            for item in (self._fallback.get("items") or [])
-            if item.get("id") not in id_set
-        ]
-        fallback_removed = before - len(self._fallback["items"])
-        if fallback_removed:
-            self._save_fallback()
-            if self._collection is None:
-                removed = fallback_removed
-        return removed
+        self._collection.delete(ids=list(ids))
+        return len(ids)
 
 
 _vector_store: VectorStore | None = None

@@ -423,4 +423,3 @@ def test_settings_paths_are_absolute():
 
     assert Path(settings.data_dir).is_absolute()
     assert Path(settings.chroma_dir).is_absolute()
-    assert Path(settings.graph_store_path).is_absolute()

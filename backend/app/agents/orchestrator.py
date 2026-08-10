@@ -1449,7 +1449,9 @@ class QAOrchestrator:
         runtime_diagnostics = {
             **openai.diagnostics(),
             **get_vector_store().diagnostics(),
-            "graph_store_mode": "neo4j+json" if settings.neo4j_enabled else "json",
+            "graph_store_mode": (
+                "neo4j+mongo" if settings.neo4j_enabled else "mongo"
+            ),
             "generation_backend": generation_backend,
             "duplicates_removed": duplicates_removed,
             "model_routing": model_routing,

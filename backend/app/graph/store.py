@@ -9,13 +9,28 @@ from typing import Any, Protocol
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models.enums import NodeType, RelationshipType, SourceType
+from app.db.mongo import (
+    get_qa_analyses_collection_sync,
+    get_qa_bugs_collection_sync,
+    get_qa_document_chunks_collection_sync,
+    get_qa_documents_collection_sync,
+    get_qa_edges_collection_sync,
+    get_qa_external_knowledge_sources_collection_sync,
+    get_qa_graph_versions_collection_sync,
+    get_qa_nodes_collection_sync,
+    get_qa_projects_collection_sync,
+    get_qa_test_cases_collection_sync,
+    get_qa_test_review_overrides_collection_sync,
+    get_qa_test_reviews_collection_sync,
+)
+from app.models.enums import NodeType, Priority, RelationshipType, SourceType
 from app.models.schemas import (
     GraphEdge,
     GraphNode,
     GraphPath,
     Provenance,
     SystemFlowGraph,
+    new_id,
     utc_now,
 )
 
@@ -59,7 +74,7 @@ class InMemoryGraphStore:
 
     def __init__(self, path: str | None = None) -> None:
         settings = get_settings()
-        self.path = Path(path or settings.graph_store_path)
+        self.path = Path(path or (Path(settings.data_dir) / "graph_store.json"))
         self._lock = threading.RLock()
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[str, GraphEdge] = {}
@@ -89,16 +104,10 @@ class InMemoryGraphStore:
         payload = {**case, "project_id": project_id}
         tid = str(payload.get("test_case_id") or "")
         if not tid:
-            from app.models.schemas import new_id
-
             tid = new_id("TC")
             payload["test_case_id"] = tid
         key = self.artifact_key(project_id, tid)
         with self._lock:
-            # Drop legacy bare-key collision for the same project
-            legacy = self.test_cases.get(tid)
-            if legacy and legacy.get("project_id") == project_id and tid != key:
-                del self.test_cases[tid]
             self.test_cases[key] = payload
             self.persist()
         return payload
@@ -111,26 +120,16 @@ class InMemoryGraphStore:
             row = self.test_cases.get(key)
             if row and row.get("project_id") == project_id:
                 return row
-            # Legacy bare key
-            legacy = self.test_cases.get(test_case_id)
-            if legacy and legacy.get("project_id") == project_id:
-                return legacy
         return None
 
     def delete_test_case(self, project_id: str, test_case_id: str) -> bool:
         key = self.artifact_key(project_id, test_case_id)
         with self._lock:
-            removed = False
-            if (
-                key in self.test_cases
-                and self.test_cases[key].get("project_id") == project_id
-            ):
+            removed = key in self.test_cases and self.test_cases[key].get(
+                "project_id"
+            ) == project_id
+            if removed:
                 del self.test_cases[key]
-                removed = True
-            legacy = self.test_cases.get(test_case_id)
-            if legacy and legacy.get("project_id") == project_id:
-                del self.test_cases[test_case_id]
-                removed = True
             if removed:
                 self.persist()
             return removed
@@ -151,16 +150,12 @@ class InMemoryGraphStore:
         payload = {**bug, "project_id": project_id}
         bid = str(payload.get("bug_id") or "")
         if not bid:
-            from app.models.schemas import new_id
-
             bid = new_id("BUG")
             payload["bug_id"] = bid
         key = self.artifact_key(project_id, bid)
         with self._lock:
-            legacy = self.bugs.get(bid)
-            if legacy and legacy.get("project_id") == project_id and bid != key:
-                del self.bugs[bid]
             self.bugs[key] = payload
+            self.persist()
         return payload
 
     def set_latest_analysis(self, project_id: str, analysis: dict[str, Any]) -> None:
@@ -182,8 +177,6 @@ class InMemoryGraphStore:
         for key, value in self.test_reviews.items():
             if key.startswith(prefix):
                 out[key[len(prefix) :]] = value
-            elif value.get("project_id") == project_id:
-                out[str(value.get("test_case_id") or key)] = value
         return out
 
     def set_test_review(
@@ -245,9 +238,6 @@ class InMemoryGraphStore:
         for key, value in self.test_review_overrides.items():
             if key.startswith(prefix):
                 tid = key[len(prefix) :]
-                out[tid] = value
-            elif value.get("project_id") == project_id:
-                tid = str(value.get("test_case_id") or key)
                 out[tid] = value
         return out
 
@@ -624,8 +614,6 @@ class InMemoryGraphStore:
     def create_project(
         self, name: str, description: str = "", root_feature: str | None = None
     ) -> dict[str, Any]:
-        from app.models.schemas import new_id
-
         pid = new_id("project")
         root_id = None
         if root_feature:
@@ -636,9 +624,7 @@ class InMemoryGraphStore:
                 description=f"Root feature for {name}",
                 project_id=pid,
                 is_critical=True,
-                criticality=__import__(
-                    "app.models.enums", fromlist=["Priority"]
-                ).Priority.HIGH,
+                criticality=Priority.HIGH,
                 provenance=Provenance(
                     source_type=SourceType.USER_INPUT, inferred=False, confidence=1.0
                 ),
@@ -705,7 +691,6 @@ class InMemoryGraphStore:
                 key
                 for key, case in self.test_cases.items()
                 if case.get("project_id") == project_id
-                or key.startswith(f"{project_id}::")
             ]
             tests_removed = len(test_keys)
             for key in test_keys:
@@ -715,7 +700,6 @@ class InMemoryGraphStore:
                 key
                 for key, bug in self.bugs.items()
                 if bug.get("project_id") == project_id
-                or key.startswith(f"{project_id}::")
             ]
             bugs_removed = len(bug_keys)
             for key in bug_keys:
@@ -725,7 +709,6 @@ class InMemoryGraphStore:
                 key
                 for key, review in self.test_reviews.items()
                 if review.get("project_id") == project_id
-                or key.startswith(f"{project_id}::")
             ]
             for key in review_keys:
                 del self.test_reviews[key]
@@ -733,8 +716,7 @@ class InMemoryGraphStore:
             override_keys = [
                 key
                 for key in self.test_review_overrides
-                if key.startswith(f"{project_id}::")
-                or (self.test_review_overrides[key].get("project_id") == project_id)
+                if self.test_review_overrides[key].get("project_id") == project_id
             ]
             for key in override_keys:
                 del self.test_review_overrides[key]
@@ -776,6 +758,377 @@ class InMemoryGraphStore:
                 "graph_versions": len(versions),
                 "analyses": 1 if analysis else 0,
             }
+
+
+class MongoGraphStore(InMemoryGraphStore):
+    """Mongo-backed graph/domain store while preserving in-memory API contracts."""
+
+    def __init__(self, path: str | None = None) -> None:
+        super().__init__(path=path)
+
+    def _load(self) -> None:
+        self.nodes = {}
+        self.edges = {}
+        self.projects = {}
+        self.documents = {}
+        self.test_cases = {}
+        self.bugs = {}
+        self.graph_versions = {}
+        self.latest_analyses = {}
+        self.test_reviews = {}
+        self.test_review_overrides = {}
+        self.external_knowledge_sources = {}
+        try:
+            projects = list(get_qa_projects_collection_sync().find({}))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mongo_graph_store_load_failed", error=str(exc))
+            return
+        if not projects:
+            return
+
+        self.projects = {p["project_id"]: p["project"] for p in projects}
+
+        self.nodes = {}
+        for raw in get_qa_nodes_collection_sync().find({}):
+            self.nodes[raw["node_id"]] = GraphNode.model_validate(raw["node"])
+
+        self.edges = {}
+        for raw in get_qa_edges_collection_sync().find({}):
+            self.edges[raw["edge_id"]] = GraphEdge.model_validate(raw["edge"])
+
+        chunks_by_doc: dict[str, list[dict[str, Any]]] = {}
+        for chunk in get_qa_document_chunks_collection_sync().find({}):
+            doc_id = str(chunk.get("document_id") or "")
+            if not doc_id:
+                continue
+            payload = dict(chunk.get("chunk") or {})
+            if payload:
+                chunks_by_doc.setdefault(doc_id, []).append(payload)
+
+        self.documents = {}
+        for doc in get_qa_documents_collection_sync().find({}):
+            payload = dict(doc.get("document") or {})
+            doc_id = str(payload.get("id") or doc.get("document_id") or "")
+            if doc_id:
+                payload["chunks"] = chunks_by_doc.get(doc_id, [])
+                self.documents[doc_id] = payload
+
+        self.test_cases = {}
+        for row in get_qa_test_cases_collection_sync().find({}):
+            payload = dict(row.get("test_case") or {})
+            project_id = str(row.get("project_id") or payload.get("project_id") or "")
+            test_case_id = str(row.get("test_case_id") or payload.get("test_case_id") or "")
+            if not project_id or not test_case_id:
+                continue
+            self.test_cases[self.artifact_key(project_id, test_case_id)] = payload
+
+        self.bugs = {}
+        for row in get_qa_bugs_collection_sync().find({}):
+            payload = dict(row.get("bug") or {})
+            project_id = str(row.get("project_id") or payload.get("project_id") or "")
+            bug_id = str(row.get("bug_id") or payload.get("bug_id") or "")
+            if not project_id or not bug_id:
+                continue
+            self.bugs[self.artifact_key(project_id, bug_id)] = payload
+
+        self.graph_versions = {}
+        for row in get_qa_graph_versions_collection_sync().find({}):
+            project_id = str(row.get("project_id") or "")
+            if not project_id:
+                continue
+            self.graph_versions.setdefault(project_id, []).append(
+                {
+                    "version": row.get("version"),
+                    "snapshot": row.get("snapshot"),
+                    "saved_at": row.get("saved_at"),
+                }
+            )
+
+        self.latest_analyses = {}
+        for row in get_qa_analyses_collection_sync().find({"is_latest": True}):
+            project_id = str(row.get("project_id") or "")
+            analysis = dict(row.get("analysis") or {})
+            if project_id:
+                self.latest_analyses[project_id] = analysis
+
+        self.test_reviews = {}
+        for row in get_qa_test_reviews_collection_sync().find({}):
+            payload = dict(row.get("review") or {})
+            project_id = str(row.get("project_id") or payload.get("project_id") or "")
+            test_case_id = str(row.get("test_case_id") or payload.get("test_case_id") or "")
+            if project_id and test_case_id:
+                self.test_reviews[self.artifact_key(project_id, test_case_id)] = payload
+
+        self.test_review_overrides = {}
+        for row in get_qa_test_review_overrides_collection_sync().find({}):
+            payload = dict(row.get("override") or {})
+            project_id = str(row.get("project_id") or payload.get("project_id") or "")
+            test_case_id = str(row.get("test_case_id") or payload.get("test_case_id") or "")
+            if project_id and test_case_id:
+                self.test_review_overrides[self.artifact_key(project_id, test_case_id)] = payload
+
+        self.external_knowledge_sources = {}
+        for row in get_qa_external_knowledge_sources_collection_sync().find({}):
+            payload = dict(row.get("source") or {})
+            source_id = str(row.get("source_id") or payload.get("source_id") or "")
+            if source_id:
+                self.external_knowledge_sources[source_id] = payload
+
+        logger.info(
+            "mongo_graph_store_loaded",
+            projects=len(self.projects),
+            nodes=len(self.nodes),
+            edges=len(self.edges),
+            documents=len(self.documents),
+            tests=len(self.test_cases),
+            bugs=len(self.bugs),
+        )
+
+    def persist(self) -> None:
+        self._persist_mongo()
+
+    def _refresh_projects_from_mongo(self) -> None:
+        """Refresh project cache so external seeds are visible without restart."""
+        try:
+            projects = list(get_qa_projects_collection_sync().find({}))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mongo_project_refresh_failed", error=str(exc))
+            return
+        self.projects = {p["project_id"]: p["project"] for p in projects}
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        self._refresh_projects_from_mongo()
+        return super().list_projects()
+
+    def get_project(self, project_id: str) -> dict[str, Any] | None:
+        self._refresh_projects_from_mongo()
+        return super().get_project(project_id)
+
+    def _sync_collection(
+        self, collection: Any, docs: list[dict[str, Any]], key_field: str
+    ) -> None:
+        existing_keys = set()
+        for doc in docs:
+            key = doc.get(key_field)
+            if key is None:
+                continue
+            existing_keys.add(key)
+            collection.replace_one({key_field: key}, doc, upsert=True)
+        if existing_keys:
+            collection.delete_many({key_field: {"$nin": list(existing_keys)}})
+        else:
+            collection.delete_many({})
+
+    def _persist_mongo(self) -> None:
+        projects_docs = []
+        for project_id, project in self.projects.items():
+            projects_docs.append(
+                {"project_id": project_id, "project": project, "_id": project_id}
+            )
+        self._sync_collection(get_qa_projects_collection_sync(), projects_docs, "project_id")
+
+        node_docs = []
+        for node_id, node in self.nodes.items():
+            node_dump = node.model_dump(mode="json")
+            node_docs.append(
+                {
+                    "_id": node_id,
+                    "node_id": node_id,
+                    "project_id": node.project_id,
+                    "type": str(node.type.value),
+                    "name_lc": node.name.lower().strip(),
+                    "node": node_dump,
+                }
+            )
+        self._sync_collection(get_qa_nodes_collection_sync(), node_docs, "node_id")
+
+        edge_docs = []
+        for edge_id, edge in self.edges.items():
+            source_node = self.nodes.get(edge.source)
+            project_id = source_node.project_id if source_node else None
+            edge_docs.append(
+                {
+                    "_id": edge_id,
+                    "edge_id": edge_id,
+                    "project_id": project_id,
+                    "source_node_id": edge.source,
+                    "target_node_id": edge.target,
+                    "relationship": str(edge.relationship),
+                    "edge": edge.model_dump(mode="json"),
+                }
+            )
+        self._sync_collection(get_qa_edges_collection_sync(), edge_docs, "edge_id")
+
+        documents_docs = []
+        chunks_docs: list[dict[str, Any]] = []
+        for document_id, document in self.documents.items():
+            documents_docs.append(
+                {
+                    "_id": document_id,
+                    "document_id": document_id,
+                    "project_id": document.get("project_id"),
+                    "filename": document.get("filename"),
+                    "content_hash": document.get("content_hash"),
+                    "document": document,
+                }
+            )
+            for idx, chunk in enumerate(document.get("chunks", [])):
+                chunk_id = str(chunk.get("id") or "")
+                if not chunk_id:
+                    continue
+                metadata = chunk.get("metadata") or {}
+                chunks_docs.append(
+                    {
+                        "_id": chunk_id,
+                        "chunk_id": chunk_id,
+                        "project_id": chunk.get("project_id") or document.get("project_id"),
+                        "document_id": document_id,
+                        "source_type": metadata.get("source_type"),
+                        "feature": metadata.get("feature"),
+                        "chunk_index": idx,
+                        "chunk": chunk,
+                    }
+                )
+        self._sync_collection(
+            get_qa_documents_collection_sync(), documents_docs, "document_id"
+        )
+        self._sync_collection(
+            get_qa_document_chunks_collection_sync(), chunks_docs, "chunk_id"
+        )
+
+        test_case_docs = []
+        for payload in self.test_cases.values():
+            project_id = str(payload.get("project_id") or "")
+            test_case_id = str(payload.get("test_case_id") or "")
+            if not project_id or not test_case_id:
+                continue
+            key = self.artifact_key(project_id, test_case_id)
+            test_case_docs.append(
+                {
+                    "_id": key,
+                    "key": key,
+                    "project_id": project_id,
+                    "test_case_id": test_case_id,
+                    "generation_method": payload.get("generation_method"),
+                    "updated_at": payload.get("updated_at"),
+                    "test_case": payload,
+                }
+            )
+        self._sync_collection(get_qa_test_cases_collection_sync(), test_case_docs, "key")
+
+        bug_docs = []
+        for payload in self.bugs.values():
+            project_id = str(payload.get("project_id") or "")
+            bug_id = str(payload.get("bug_id") or "")
+            if not project_id or not bug_id:
+                continue
+            key = self.artifact_key(project_id, bug_id)
+            bug_docs.append(
+                {
+                    "_id": key,
+                    "key": key,
+                    "project_id": project_id,
+                    "bug_id": bug_id,
+                    "created_at": payload.get("created_at"),
+                    "bug": payload,
+                }
+            )
+        self._sync_collection(get_qa_bugs_collection_sync(), bug_docs, "key")
+
+        analysis_docs = []
+        for project_id, analysis in self.latest_analyses.items():
+            analysis_id = str(analysis.get("analysis_id") or f"latest-{project_id}")
+            analysis_docs.append(
+                {
+                    "_id": analysis_id,
+                    "analysis_id": analysis_id,
+                    "project_id": project_id,
+                    "is_latest": True,
+                    "created_at": analysis.get("created_at") or analysis.get("updated_at"),
+                    "updated_at": analysis.get("updated_at"),
+                    "analysis": analysis,
+                }
+            )
+        self._sync_collection(get_qa_analyses_collection_sync(), analysis_docs, "analysis_id")
+
+        review_docs = []
+        for payload in self.test_reviews.values():
+            project_id = str(payload.get("project_id") or "")
+            test_case_id = str(payload.get("test_case_id") or "")
+            if not project_id or not test_case_id:
+                continue
+            key = self.artifact_key(project_id, test_case_id)
+            review_docs.append(
+                {
+                    "_id": key,
+                    "key": key,
+                    "project_id": project_id,
+                    "test_case_id": test_case_id,
+                    "updated_at": payload.get("updated_at"),
+                    "review": payload,
+                }
+            )
+        self._sync_collection(get_qa_test_reviews_collection_sync(), review_docs, "key")
+
+        override_docs = []
+        for payload in self.test_review_overrides.values():
+            project_id = str(payload.get("project_id") or "")
+            test_case_id = str(payload.get("test_case_id") or "")
+            if not project_id or not test_case_id:
+                continue
+            key = self.artifact_key(project_id, test_case_id)
+            override_docs.append(
+                {
+                    "_id": key,
+                    "key": key,
+                    "project_id": project_id,
+                    "test_case_id": test_case_id,
+                    "override_timestamp": payload.get("override_timestamp"),
+                    "override": payload,
+                }
+            )
+        self._sync_collection(
+            get_qa_test_review_overrides_collection_sync(), override_docs, "key"
+        )
+
+        graph_version_docs = []
+        for project_id, versions in self.graph_versions.items():
+            for row in versions:
+                version = int(row.get("version") or 0)
+                key = f"{project_id}::{version}"
+                graph_version_docs.append(
+                    {
+                        "_id": key,
+                        "key": key,
+                        "project_id": project_id,
+                        "version": version,
+                        "saved_at": row.get("saved_at"),
+                        "snapshot": row.get("snapshot"),
+                    }
+                )
+        self._sync_collection(
+            get_qa_graph_versions_collection_sync(), graph_version_docs, "key"
+        )
+
+        source_docs = []
+        for source_id, source in self.external_knowledge_sources.items():
+            source_docs.append(
+                {
+                    "_id": source_id,
+                    "source_id": source_id,
+                    "qa_project_id": source.get("qa_project_id"),
+                    "cloud_id": source.get("cloud_id"),
+                    "source_type": source.get("source_type"),
+                    "external_id": source.get("external_id"),
+                    "last_synced_at": source.get("last_synced_at"),
+                    "source": source,
+                }
+            )
+        self._sync_collection(
+            get_qa_external_knowledge_sources_collection_sync(),
+            source_docs,
+            "source_id",
+        )
 
 
 class Neo4jGraphStore:
@@ -846,7 +1199,10 @@ _neo4j: Neo4jGraphStore | None = None
 def get_graph_store() -> InMemoryGraphStore:
     global _store
     if _store is None:
-        _store = InMemoryGraphStore()
+        settings = get_settings()
+        if not settings.mongo_enabled:
+            raise RuntimeError("Mongo graph store requires MONGO_ENABLED=true")
+        _store = MongoGraphStore()
     return _store
 
 
@@ -855,3 +1211,5 @@ def get_neo4j_store() -> Neo4jGraphStore:
     if _neo4j is None:
         _neo4j = Neo4jGraphStore(get_graph_store())
     return _neo4j
+
+

@@ -1,51 +1,31 @@
-"""Encrypted local-development Atlassian connection token store.
-
-Replaceable with a production DB adapter; tokens never appear in API responses.
-"""
+"""Encrypted Atlassian connection token store backed by MongoDB."""
 
 from __future__ import annotations
 
-import json
 import threading
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-from app.core.config import get_settings
+from app.db.mongo import (
+    get_atlassian_connections_collection_sync,
+    get_atlassian_oauth_states_collection_sync,
+)
 from app.integrations.atlassian.crypto import decrypt_secret, encrypt_secret
 from app.models.schemas import new_id, utc_now
 
 _lock = threading.RLock()
 
 
-def _store_path() -> Path:
-    return get_settings().atlassian_data_dir / "connection.json"
-
-
-def _state_path() -> Path:
-    return get_settings().atlassian_data_dir / "oauth_states.json"
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
+def _connection_scope(payload: dict[str, Any]) -> str:
+    return str(payload.get("user_scope_id") or "local")
 
 
 def load_connection() -> dict[str, Any] | None:
     with _lock:
-        data = _read_json(_store_path())
-        return data or None
+        row = get_atlassian_connections_collection_sync().find_one(
+            {"scope_key": "local"}
+        )
+        return dict(row.get("connection") or {}) if row else None
 
 
 def save_connection(payload: dict[str, Any]) -> dict[str, Any]:
@@ -55,15 +35,23 @@ def save_connection(payload: dict[str, Any]) -> dict[str, Any]:
             payload["connection_id"] = new_id("atl")
         if "created_at" not in payload:
             payload["created_at"] = payload["updated_at"]
-        _write_json(_store_path(), payload)
+        scope_key = _connection_scope(payload)
+        get_atlassian_connections_collection_sync().replace_one(
+            {"scope_key": scope_key},
+            {
+                "_id": scope_key,
+                "scope_key": scope_key,
+                "updated_at": payload["updated_at"],
+                "connection": payload,
+            },
+            upsert=True,
+        )
         return payload
 
 
 def delete_connection() -> None:
     with _lock:
-        path = _store_path()
-        if path.exists():
-            path.unlink()
+        get_atlassian_connections_collection_sync().delete_one({"scope_key": "local"})
 
 
 def set_tokens(
@@ -124,18 +112,22 @@ def token_expired() -> bool:
 
 def save_oauth_state(state: str, payload: dict[str, Any]) -> None:
     with _lock:
-        data = _read_json(_state_path())
-        data[state] = {**payload, "created_at": utc_now().isoformat()}
-        # prune old
-        if len(data) > 50:
-            items = sorted(data.items(), key=lambda x: x[1].get("created_at") or "")
-            data = dict(items[-30:])
-        _write_json(_state_path(), data)
+        created_at = utc_now().isoformat()
+        get_atlassian_oauth_states_collection_sync().replace_one(
+            {"state": state},
+            {
+                "_id": state,
+                "state": state,
+                "created_at": created_at,
+                "payload": {**payload, "created_at": created_at},
+            },
+            upsert=True,
+        )
 
 
 def pop_oauth_state(state: str) -> dict[str, Any] | None:
     with _lock:
-        data = _read_json(_state_path())
-        payload = data.pop(state, None)
-        _write_json(_state_path(), data)
-        return payload
+        row = get_atlassian_oauth_states_collection_sync().find_one_and_delete(
+            {"state": state}
+        )
+        return dict(row.get("payload") or {}) if row else None
