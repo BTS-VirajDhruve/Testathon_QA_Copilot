@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from app.graph.nl.builder import nested_import_stats, tree_to_nested_import
 from app.graph.nl.classifier import NodeClassifier
@@ -89,7 +90,9 @@ class NLGraphPipeline:
             n.type_confidence < 0.75 for n in tree.all_nodes() if n is not tree.root
         )
         # Confidence: high when no LLM and good rule coverage
-        if llm_calls == 0 and class_stats.get("rule_hits", 0) >= max(1, class_stats.get("nodes", 1) * 0.6):
+        if llm_calls == 0 and class_stats.get("rule_hits", 0) >= max(
+            1, class_stats.get("nodes", 1) * 0.6
+        ):
             confidence = 0.9
         elif llm_calls == 0:
             confidence = 0.75

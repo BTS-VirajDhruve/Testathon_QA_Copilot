@@ -39,7 +39,10 @@ logger = get_logger(__name__)
 
 
 TECHNIQUE_BY_PATH = [
-    (("failure", "lockout", "invalid", "timeout"), "Negative testing / fault injection"),
+    (
+        ("failure", "lockout", "invalid", "timeout"),
+        "Negative testing / fault injection",
+    ),
     (("oauth", "sso", "saml", "oidc", "provider"), "Integration & security testing"),
     (("mfa", "session", "fixation"), "Security testing"),
     (("validation", "registration"), "Boundary value & validation testing"),
@@ -220,7 +223,9 @@ Rules:
         )
 
         if openai.available:
-            llm_cases = self._generate_with_llm(query, fused, project_id, openai, routing_context=ctx)
+            llm_cases = self._generate_with_llm(
+                query, fused, project_id, openai, routing_context=ctx
+            )
             if llm_cases:
                 cases = llm_cases
                 method = "llm"
@@ -252,7 +257,9 @@ Rules:
             if case.evidence and not case.source_references:
                 case.source_references = legacy_source_strings(case.evidence)
             elif case.evidence:
-                merged = list(case.source_references) + legacy_source_strings(case.evidence)
+                merged = list(case.source_references) + legacy_source_strings(
+                    case.evidence
+                )
                 seen_refs: set[str] = set()
                 unique_refs: list[str] = []
                 for s in merged:
@@ -372,7 +379,10 @@ Rules:
         for entry in base.get("discovered_graph_paths") or []:
             if not isinstance(entry, dict):
                 continue
-            labels = [str(x) for x in (entry.get("node_labels") or entry.get("path_sequence") or [])]
+            labels = [
+                str(x)
+                for x in (entry.get("node_labels") or entry.get("path_sequence") or [])
+            ]
             if not gap_tokens or gap_tokens.intersection({x.lower() for x in labels}):
                 relevant_paths.append(entry)
         if not relevant_paths and gap.graph_path:
@@ -423,10 +433,14 @@ Rules:
             ),
             "coverage_gap": {
                 "gap_id": gap.gap_id,
-                "gap_type": gap.gap_type.value if hasattr(gap.gap_type, "value") else gap.gap_type,
+                "gap_type": gap.gap_type.value
+                if hasattr(gap.gap_type, "value")
+                else gap.gap_type,
                 "title": gap.title,
                 "description": gap.description,
-                "priority": gap.priority.value if hasattr(gap.priority, "value") else gap.priority,
+                "priority": gap.priority.value
+                if hasattr(gap.priority, "value")
+                else gap.priority,
                 "risk": gap.risk.value if hasattr(gap.risk, "value") else gap.risk,
                 "graph_path": gap.graph_path,
                 "reason": gap.reason,
@@ -436,7 +450,9 @@ Rules:
             "relevant_graph_path": gap.graph_path,
             "relevant_graph_paths": relevant_paths or "unavailable",
             "relevant_requirements": base.get("requirements") or "unavailable",
-            "relevant_historical_bugs": relevant_bugs or base.get("historical_bugs") or "unavailable",
+            "relevant_historical_bugs": relevant_bugs
+            or base.get("historical_bugs")
+            or "unavailable",
             "existing_tests_do_not_duplicate": existing_summaries or "none",
             "allowed_evidence_catalog": base.get("allowed_evidence_catalog") or [],
             "evidence_rules": base.get("evidence_rules"),
@@ -470,8 +486,13 @@ Rules:
         )
         # Critical gaps inherit security/release sensitivity from gap risk when present
         if str(getattr(gap, "risk", "")).lower() in {"critical", "high"}:
-            ctx.security_sensitive = ctx.security_sensitive or "security" in (gap.title or "").lower()
-            ctx.release_blocking = ctx.release_blocking or str(getattr(gap, "risk", "")).lower() == "critical"
+            ctx.security_sensitive = (
+                ctx.security_sensitive or "security" in (gap.title or "").lower()
+            )
+            ctx.release_blocking = (
+                ctx.release_blocking
+                or str(getattr(gap, "risk", "")).lower() == "critical"
+            )
 
         if openai.available:
             llm_cases = self._generate_targeted_with_llm(
@@ -482,9 +503,13 @@ Rules:
                 logger.info("targeted_llm_success", gap_id=gap.gap_id, count=len(cases))
             else:
                 logger.warning("targeted_llm_failed_using_fallback", gap_id=gap.gap_id)
-                cases = self._generate_targeted_deterministic(gap, fused, project_id, existing_tests)
+                cases = self._generate_targeted_deterministic(
+                    gap, fused, project_id, existing_tests
+                )
         else:
-            cases = self._generate_targeted_deterministic(gap, fused, project_id, existing_tests)
+            cases = self._generate_targeted_deterministic(
+                gap, fused, project_id, existing_tests
+            )
 
         catalog = build_evidence_catalog(fused)
         for case in cases:
@@ -519,7 +544,9 @@ Rules:
             if case.evidence and not case.source_references:
                 case.source_references = legacy_source_strings(case.evidence)
             elif case.evidence:
-                merged = list(case.source_references) + legacy_source_strings(case.evidence)
+                merged = list(case.source_references) + legacy_source_strings(
+                    case.evidence
+                )
                 seen_refs: set[str] = set()
                 unique_refs: list[str] = []
                 for s in merged:
@@ -629,8 +656,13 @@ Rules:
             if item.get("path")
         }
         meta = path_meta.get(tuple(path), {})
-        gap_type = gap.gap_type.value if hasattr(gap.gap_type, "value") else str(gap.gap_type)
-        is_failure = bool(meta.get("is_failure_path")) or gap_type in ("failure", "negative")
+        gap_type = (
+            gap.gap_type.value if hasattr(gap.gap_type, "value") else str(gap.gap_type)
+        )
+        is_failure = bool(meta.get("is_failure_path")) or gap_type in (
+            "failure",
+            "negative",
+        )
         external = bool(meta.get("includes_external_dependency")) or gap_type == "risk"
         catalog = build_evidence_catalog(fused)
 
@@ -674,7 +706,9 @@ Rules:
             if e.source_type == "coverage_gap":
                 continue
             evidence.append(e)
-        evidence.extend(evidence_for_path_bugs_and_requirements(path, fused, catalog)[:4])
+        evidence.extend(
+            evidence_for_path_bugs_and_requirements(path, fused, catalog)[:4]
+        )
         evidence = sanitize_evidence(evidence, catalog) or evidence[:1]
 
         reasoning = (
@@ -771,11 +805,15 @@ Rules:
                 logger.warning(
                     "testcase_llm_attempt_unusable",
                     attempt=attempt,
-                    raw_keys=list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+                    raw_keys=list(data.keys())
+                    if isinstance(data, dict)
+                    else type(data).__name__,
                 )
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
-                logger.warning("testcase_llm_attempt_failed", attempt=attempt, error=last_error)
+                logger.warning(
+                    "testcase_llm_attempt_failed", attempt=attempt, error=last_error
+                )
 
         logger.warning("testcase_llm_exhausted_attempts", last_error=last_error)
         return []
@@ -822,7 +860,9 @@ Rules:
                 if not payload.get("title"):
                     continue
                 if not payload.get("expected_result"):
-                    payload["expected_result"] = "Behavior matches evidence-backed expectations."
+                    payload["expected_result"] = (
+                        "Behavior matches evidence-backed expectations."
+                    )
 
                 # Sanitize evidence before validation — drop fabricated IDs
                 claimed_evidence = payload.pop("evidence", None) or []
@@ -870,7 +910,9 @@ Rules:
         _ = query  # reserved for parity with LLM signature / future filters
         cases: list[TestCase] = []
         feature = fused.feature_context.get("name") or "Feature"
-        existing_titles = {(t.get("title") or "").lower() for t in fused.existing_coverage}
+        existing_titles = {
+            (t.get("title") or "").lower() for t in fused.existing_coverage
+        }
         existing_tokens: set[str] = set()
         for t in fused.existing_coverage:
             for part in t.get("graph_path") or []:
@@ -901,7 +943,9 @@ Rules:
                 title = f"Verify existing coverage: {title}"
 
             risk = RiskLevel.HIGH if is_failure or external else RiskLevel.MEDIUM
-            evidence = evidence_for_path_bugs_and_requirements(path_list, fused, catalog)
+            evidence = evidence_for_path_bugs_and_requirements(
+                path_list, fused, catalog
+            )
             reasoning = (
                 f"This test covers the discovered graph path {' → '.join(path_list)}. "
                 + (
@@ -911,7 +955,9 @@ Rules:
                 )
                 + (" Failure/negative behavior is in scope." if is_failure else "")
             )
-            sources = legacy_source_strings(evidence) or ["User-provided system flow graph"]
+            sources = legacy_source_strings(evidence) or [
+                "User-provided system flow graph"
+            ]
 
             cases.append(
                 TestCase(
@@ -951,9 +997,15 @@ Rules:
 
     def _title_for(self, path: list[str], is_failure: bool) -> str:
         leaf = path[-1] if path else "flow"
-        if is_failure or any(k in leaf.lower() for k in ("invalid", "failure", "lockout", "timeout")):
+        if is_failure or any(
+            k in leaf.lower() for k in ("invalid", "failure", "lockout", "timeout")
+        ):
             return f"Graceful handling: {' → '.join(path)}"
-        if "valid" in leaf.lower() or "session" in leaf.lower() or leaf.lower() in {"callback", "consent"}:
+        if (
+            "valid" in leaf.lower()
+            or "session" in leaf.lower()
+            or leaf.lower() in {"callback", "consent"}
+        ):
             return f"Successful journey: {' → '.join(path)}"
         return f"Validate path: {' → '.join(path)}"
 
@@ -962,11 +1014,16 @@ Rules:
         if "google" in joined or "oauth" in joined:
             return {"provider": "Google", "account": "qa.oauth@example.com"}
         if "sso" in joined or "saml" in joined or "oidc" in joined:
-            return {"idp": "enterprise-idp", "protocol": "SAML" if "saml" in joined else "OIDC"}
+            return {
+                "idp": "enterprise-idp",
+                "protocol": "SAML" if "saml" in joined else "OIDC",
+            }
         if "password" in joined or "email" in joined:
             return {
                 "email": "qa.user@example.com",
-                "password": "WrongPass!" if is_failure or "invalid" in joined else "CorrectPass!23",
+                "password": "WrongPass!"
+                if is_failure or "invalid" in joined
+                else "CorrectPass!23",
             }
         return {"persona": "standard_user"}
 
@@ -1151,7 +1208,10 @@ class BugReportAgent:
                     expected_result="Gap is covered by an automated or exploratory check with clear expected behavior.",
                     actual_result="(Candidate) Gap currently uncovered — defect may escape detection.",
                     graph_path=fused.flow_paths[0] if fused.flow_paths else [],
-                    source_references=["Coverage gap analysis", "User-provided system flow graph"],
+                    source_references=[
+                        "Coverage gap analysis",
+                        "User-provided system flow graph",
+                    ],
                     classification="candidate",
                     generation_method="deterministic_fallback",
                     business_impact="Uncovered critical paths increase release risk.",
@@ -1179,7 +1239,10 @@ class BugReportAgent:
                         ],
                         expected_result="Graceful degradation, retries/idempotency, and clear user-facing errors.",
                         actual_result="(Candidate) Observe orphaned transactions, duplicate side-effects, or stuck states.",
-                        graph_path=[fused.feature_context.get("name") or "Feature", name],
+                        graph_path=[
+                            fused.feature_context.get("name") or "Feature",
+                            name,
+                        ],
                         affected_components=[name],
                         source_references=["User-provided system flow graph"],
                         classification="candidate",
@@ -1205,11 +1268,7 @@ class RegressionAgent:
         """Recommend retests from impact, existing/generated tests, and high-risk graph areas."""
         recs: list[RegressionRecommendation] = []
         feature = fused.feature_context.get("name") or "Feature"
-        changed = (
-            changed_node
-            or (impact.changed_node if impact else None)
-            or feature
-        )
+        changed = changed_node or (impact.changed_node if impact else None) or feature
 
         def _add(rec: RegressionRecommendation) -> None:
             recs.append(rec)
@@ -1221,7 +1280,9 @@ class RegressionAgent:
             related = False
             if changed and changed.lower() in path_l:
                 related = True
-            if impact and any(n.lower() in path_l for n in impact.directly_impacted_nodes[:10]):
+            if impact and any(
+                n.lower() in path_l for n in impact.directly_impacted_nodes[:10]
+            ):
                 related = True
             if not impact and feature and feature.lower() in path_l:
                 related = True
@@ -1237,7 +1298,10 @@ class RegressionAgent:
                         graph_path=list(path),
                         changed_node=changed,
                         priority=Priority.HIGH,
-                        source_references=["Graph impact analysis", "Existing test catalog"],
+                        source_references=[
+                            "Graph impact analysis",
+                            "Existing test catalog",
+                        ],
                         generation_method="deterministic_fallback",
                     )
                 )
@@ -1245,9 +1309,15 @@ class RegressionAgent:
         # Newly generated tests (complete analysis) — prioritize failure/high risk
         for tc in generated_tests or []:
             path = tc.graph_path or []
-            risk = (tc.risk.value if hasattr(tc.risk, "value") else str(tc.risk or "")).lower()
+            risk = (
+                tc.risk.value if hasattr(tc.risk, "value") else str(tc.risk or "")
+            ).lower()
             category = (tc.category or "").lower()
-            if risk in ("high", "critical") or "fail" in category or "negative" in category:
+            if (
+                risk in ("high", "critical")
+                or "fail" in category
+                or "negative" in category
+            ):
                 _add(
                     RegressionRecommendation(
                         test_case_id=tc.test_case_id,
@@ -1258,8 +1328,13 @@ class RegressionAgent:
                         ),
                         graph_path=list(path),
                         changed_node=changed,
-                        priority=Priority.HIGH if risk != "critical" else Priority.CRITICAL,
-                        source_references=["Generated test suite", "User-provided system flow graph"],
+                        priority=Priority.HIGH
+                        if risk != "critical"
+                        else Priority.CRITICAL,
+                        source_references=[
+                            "Generated test suite",
+                            "User-provided system flow graph",
+                        ],
                         generation_method="deterministic_fallback",
                     )
                 )
@@ -1280,7 +1355,10 @@ class RegressionAgent:
                             graph_path=path,
                             changed_node=impact.changed_node,
                             priority=Priority.HIGH,
-                            source_references=["User-provided system flow graph", "Impact analysis"],
+                            source_references=[
+                                "User-provided system flow graph",
+                                "Impact analysis",
+                            ],
                             generation_method="deterministic_fallback",
                         )
                     )
@@ -1298,7 +1376,10 @@ class RegressionAgent:
                             graph_path=path,
                             changed_node=impact.changed_node,
                             priority=Priority.MEDIUM,
-                            source_references=["User-provided system flow graph", "Impact analysis"],
+                            source_references=[
+                                "User-provided system flow graph",
+                                "Impact analysis",
+                            ],
                             generation_method="deterministic_fallback",
                         )
                     )
@@ -1340,7 +1421,10 @@ class RegressionAgent:
                             graph_path=path,
                             changed_node=changed,
                             priority=Priority.HIGH,
-                            source_references=["User-provided system flow graph", "Risk analysis"],
+                            source_references=[
+                                "User-provided system flow graph",
+                                "Risk analysis",
+                            ],
                             generation_method="deterministic_fallback",
                         )
                     )
@@ -1353,7 +1437,9 @@ class RegressionAgent:
                         test_case_id=new_id("TC"),
                         title=f"Close gap in regression pack: {gap}",
                         reason=f"Critical uncovered area remains for '{changed}': {gap}.",
-                        graph_path=fused.flow_paths[0] if fused.flow_paths else [changed],
+                        graph_path=fused.flow_paths[0]
+                        if fused.flow_paths
+                        else [changed],
                         changed_node=changed,
                         priority=Priority.HIGH,
                         source_references=["Coverage gap analysis"],
@@ -1389,7 +1475,9 @@ class ImpactAgent:
 
 
 class CoverageAgent:
-    def analyze(self, project_id: str, root_feature: str | None = None) -> CoverageGapResult:
+    def analyze(
+        self, project_id: str, root_feature: str | None = None
+    ) -> CoverageGapResult:
         return get_coverage_engine().analyze(project_id, root_feature)
 
 
@@ -1415,7 +1503,9 @@ class CriticAgent:
         notes: list[str] = []
         improved = list(test_cases)
 
-        paths_covered = {" → ".join(tc.graph_path) for tc in test_cases if tc.graph_path}
+        paths_covered = {
+            " → ".join(tc.graph_path) for tc in test_cases if tc.graph_path
+        }
         for path in fused.flow_paths:
             key = " → ".join(path)
             if key not in paths_covered:
@@ -1437,11 +1527,17 @@ class CriticAgent:
                 )
                 selected = select_gaps_for_regeneration(
                     structured,
-                    max_gaps=max(1, int(get_settings().test_generation_max_gaps_per_round)),
+                    max_gaps=max(
+                        1, int(get_settings().test_generation_max_gaps_per_round)
+                    ),
                 )
                 if selected:
                     agent = TestCaseAgent()
-                    pid = project_id or fused.feature_context.get("project_id") or "project"
+                    pid = (
+                        project_id
+                        or fused.feature_context.get("project_id")
+                        or "project"
+                    )
                     for gap in selected:
                         added = agent.generate_for_gap(gap, fused, pid, improved)
                         if added:
@@ -1484,7 +1580,9 @@ class CriticAgent:
                     ),
                 )
                 notes.extend(data.get("notes") or [])
-                notes.extend([f"Improvement: {i}" for i in data.get("improvements") or []])
+                notes.extend(
+                    [f"Improvement: {i}" for i in data.get("improvements") or []]
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("critic_llm_failed", error=str(exc))
 
@@ -1526,9 +1624,13 @@ def run_premium_reviewer_pass(
 
     openai = get_openai_service()
     if not openai.available:
-        return [f"Reviewer skipped (OpenAI unavailable): {', '.join(decision.reasons)}"], test_cases
+        return [
+            f"Reviewer skipped (OpenAI unavailable): {', '.join(decision.reasons)}"
+        ], test_cases
 
-    review_ctx = routing_context.model_copy(update={"task_type": LLMTaskType.REVIEWER_PASS})
+    review_ctx = routing_context.model_copy(
+        update={"task_type": LLMTaskType.REVIEWER_PASS}
+    )
     payload = {
         "reasons": decision.reasons,
         "quality_issues": quality_issues[:20],
@@ -1560,11 +1662,16 @@ def run_premium_reviewer_pass(
         return [f"Reviewer pass failed: {str(exc)[:120]}"], test_cases
 
     notes = [f"Reviewer: {n}" for n in (data.get("notes") or [])]
-    notes.extend([f"Reviewer improvement: {i}" for i in (data.get("improvements") or [])])
+    notes.extend(
+        [f"Reviewer improvement: {i}" for i in (data.get("improvements") or [])]
+    )
     notes.append(f"Reviewer triggered ({', '.join(decision.reasons)})")
 
     # Apply optional title corrections only — preserve structure/evidence
-    revised = {item.get("test_case_id"): item.get("title") for item in data.get("revised_titles") or []}
+    revised = {
+        item.get("test_case_id"): item.get("title")
+        for item in data.get("revised_titles") or []
+    }
     for tc in test_cases:
         new_title = revised.get(tc.test_case_id)
         if new_title and isinstance(new_title, str) and new_title.strip():
@@ -1573,7 +1680,9 @@ def run_premium_reviewer_pass(
 
 
 class RiskAgent:
-    def assess(self, fused: FusedContext, coverage: CoverageGapResult | None) -> RiskLevel:
+    def assess(
+        self, fused: FusedContext, coverage: CoverageGapResult | None
+    ) -> RiskLevel:
         score = 0
         if fused.historical_risks:
             score += 2
@@ -1582,7 +1691,8 @@ class RiskAgent:
         if any(p for p in fused.flow_paths if any("fail" in x.lower() for x in p)):
             score += 1
         if any(
-            "oauth" in " ".join(p).lower() or "sso" in " ".join(p).lower() for p in fused.flow_paths
+            "oauth" in " ".join(p).lower() or "sso" in " ".join(p).lower()
+            for p in fused.flow_paths
         ):
             score += 1
         if score >= 4:

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     PROJECT = "Project"
     USER_JOURNEY = "UserJourney"
     FEATURE = "Feature"
@@ -41,7 +41,7 @@ class NodeType(str, Enum):
     EXPLORATORY_MISSION = "ExploratoryMission"
 
 
-class RelationshipType(str, Enum):
+class RelationshipType(StrEnum):
     HAS_USER_JOURNEY = "HAS_USER_JOURNEY"
     HAS_ROOT_FEATURE = "HAS_ROOT_FEATURE"
     HAS_FEATURE = "HAS_FEATURE"
@@ -76,14 +76,14 @@ class RelationshipType(str, Enum):
     RELATED_TO = "RELATED_TO"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     USER_INPUT = "user_input"
     DOCUMENT = "document"
     LLM_INFERENCE = "llm_inference"
     EXTERNAL_SOURCE = "external_source"
 
 
-class QAIntent(str, Enum):
+class QAIntent(StrEnum):
     TEST_GENERATION = "test_generation"
     EXPLORATORY = "exploratory"
     BUG_REPORT = "bug_report"
@@ -96,27 +96,27 @@ class QAIntent(str, Enum):
     GENERAL_QA = "general_qa"
 
 
-class Priority(str, Enum):
+class Priority(StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class ConfidenceLevel(str, Enum):
+class ConfidenceLevel(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class GapType(str, Enum):
+class GapType(StrEnum):
     """Structured coverage-gap kinds used by prioritization / targeted regeneration."""
 
     GRAPH_PATH = "graph_path"
@@ -129,7 +129,7 @@ class GapType(str, Enum):
     ALTERNATE = "alternate"
 
 
-class LLMTaskType(str, Enum):
+class LLMTaskType(StrEnum):
     """What kind of LLM operation is being executed (distinct from user QAIntent)."""
 
     INTENT_CLASSIFICATION = "intent_classification"
@@ -154,14 +154,14 @@ class LLMTaskType(str, Enum):
     BDD_EXPORT_CONVERSION = "bdd_export_conversion"
 
 
-class TestValidity(str, Enum):
+class TestValidity(StrEnum):
     VALID = "valid"
     INVALID = "invalid"
     NEEDS_REVISION = "needs_revision"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
-class TestReviewStatus(str, Enum):
+class TestReviewStatus(StrEnum):
     APPROVED = "approved"
     APPROVED_WITH_CHANGES = "approved_with_changes"
     NEEDS_REVISION = "needs_revision"
@@ -169,7 +169,7 @@ class TestReviewStatus(str, Enum):
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
-class AutomationSuitability(str, Enum):
+class AutomationSuitability(StrEnum):
     AUTOMATE = "automate"
     AUTOMATE_WITH_CONDITIONS = "automate_with_conditions"
     MANUAL = "manual"
@@ -178,7 +178,7 @@ class AutomationSuitability(str, Enum):
     NOT_EVALUATED = "not_evaluated"
 
 
-class AutomationLayer(str, Enum):
+class AutomationLayer(StrEnum):
     UI = "ui"
     API = "api"
     INTEGRATION = "integration"
@@ -194,7 +194,7 @@ class AutomationLayer(str, Enum):
     UNKNOWN = "unknown"
 
 
-class AutomationPriority(str, Enum):
+class AutomationPriority(StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -202,33 +202,33 @@ class AutomationPriority(str, Enum):
     NOT_RECOMMENDED = "not_recommended"
 
 
-class AutomationEffort(str, Enum):
+class AutomationEffort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     UNKNOWN = "unknown"
 
 
-class DuplicateRelation(str, Enum):
+class DuplicateRelation(StrEnum):
     EXACT_DUPLICATE = "exact_duplicate"
     NEAR_DUPLICATE = "near_duplicate"
     COMPLEMENTARY = "complementary"
     DISTINCT = "distinct"
 
 
-class RequirementComplexity(str, Enum):
+class RequirementComplexity(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
 
 
-class TestOutputFormat(str, Enum):
+class TestOutputFormat(StrEnum):
     STANDARD = "standard"
     BDD = "bdd"
     BOTH = "both"
 
 
-class ObligationType(str, Enum):
+class ObligationType(StrEnum):
     GRAPH_PATH = "graph_path"
     GRAPH_BRANCH = "graph_branch"
     POSITIVE_FLOW = "positive_flow"
@@ -265,7 +265,7 @@ class ObligationType(str, Enum):
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
-class ObligationStatus(str, Enum):
+class ObligationStatus(StrEnum):
     OPEN = "open"
     COVERED = "covered"
     PARTIAL = "partial"
@@ -274,7 +274,7 @@ class ObligationStatus(str, Enum):
     RETIRED = "retired"
 
 
-class ConvergenceStatus(str, Enum):
+class ConvergenceStatus(StrEnum):
     COMPLETE = "complete"
     PARTIAL = "partial"
     BLOCKED = "blocked"
@@ -284,7 +284,7 @@ class ConvergenceStatus(str, Enum):
     DISABLED = "disabled"
 
 
-class ReviewFindingType(str, Enum):
+class ReviewFindingType(StrEnum):
     MISSING_TITLE = "missing_title"
     VAGUE_TITLE = "vague_title"
     MISSING_PRECONDITION = "missing_precondition"
@@ -321,7 +321,7 @@ class ReviewFindingType(str, Enum):
     INVALID_TEST = "invalid_test"
 
 
-class GeneratorRevisionMode(str, Enum):
+class GeneratorRevisionMode(StrEnum):
     CREATE = "create"
     REVISE = "revise"
     SPLIT = "split"
@@ -329,12 +329,12 @@ class GeneratorRevisionMode(str, Enum):
     RETIRE = "retire"
 
 
-class BDDScenarioType(str, Enum):
+class BDDScenarioType(StrEnum):
     SCENARIO = "scenario"
     SCENARIO_OUTLINE = "scenario_outline"
 
 
-class BDDStepKeyword(str, Enum):
+class BDDStepKeyword(StrEnum):
     GIVEN = "Given"
     WHEN = "When"
     THEN = "Then"
@@ -342,12 +342,12 @@ class BDDStepKeyword(str, Enum):
     BUT = "But"
 
 
-class TestNature(str, Enum):
+class TestNature(StrEnum):
     FUNCTIONAL = "functional"
     NON_FUNCTIONAL = "non_functional"
 
 
-class TestBehavior(str, Enum):
+class TestBehavior(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
     ALTERNATE = "alternate"
@@ -361,7 +361,7 @@ class TestBehavior(str, Enum):
     UNKNOWN = "unknown"
 
 
-class QualityAttribute(str, Enum):
+class QualityAttribute(StrEnum):
     SECURITY = "security"
     PERFORMANCE = "performance"
     ACCESSIBILITY = "accessibility"
@@ -375,7 +375,7 @@ class QualityAttribute(str, Enum):
     PRIVACY = "privacy"
 
 
-class TestLevel(str, Enum):
+class TestLevel(StrEnum):
     COMPONENT = "component"
     API = "api"
     CONTRACT = "contract"
@@ -387,7 +387,7 @@ class TestLevel(str, Enum):
     SYSTEM = "system"
 
 
-class SuiteType(str, Enum):
+class SuiteType(StrEnum):
     SMOKE = "smoke"
     SANITY = "sanity"
     REGRESSION = "regression"
@@ -397,7 +397,7 @@ class SuiteType(str, Enum):
     CRITICAL_PATH = "critical_path"
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     AUTOMATED = "automated"
     RECOMMENDED_FOR_AUTOMATION = "recommended_for_automation"
     AUTOMATE_WITH_CONDITIONS = "automate_with_conditions"
@@ -408,7 +408,7 @@ class ExecutionStatus(str, Enum):
     NOT_EVALUATED = "not_evaluated"
 
 
-class TestSource(str, Enum):
+class TestSource(StrEnum):
     EXISTING = "existing"
     GENERATED = "generated"
     TARGETED = "targeted"

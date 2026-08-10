@@ -33,7 +33,9 @@ def _fernet() -> Fernet:
                 key = raw.encode("utf-8")
                 Fernet(key)  # validate
             else:
-                key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest())
+                key = base64.urlsafe_b64encode(
+                    hashlib.sha256(raw.encode("utf-8")).digest()
+                )
         except Exception as exc:  # noqa: BLE001
             raise AtlassianIntegrationError(
                 ATLASSIAN_NOT_CONFIGURED,

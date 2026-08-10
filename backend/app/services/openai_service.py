@@ -65,7 +65,9 @@ class OpenAIService:
                     key_configured=True,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("openai_init_failed", error=str(exc), key_configured=True)
+                logger.warning(
+                    "openai_init_failed", error=str(exc), key_configured=True
+                )
                 self._client = None
 
     @property
@@ -138,12 +140,14 @@ class OpenAIService:
     ) -> str:
         selection = self._resolve_selection(task_type, routing_context, model_override)
         self.last_task_type = selection.requested_task_type.value if selection else None
-        self.last_requested_model = selection.selected_model if selection else self.settings.openai_model
+        self.last_requested_model = (
+            selection.selected_model if selection else self.settings.openai_model
+        )
 
         if self._client is None:
             self.last_chat_backend = "deterministic_fallback"
             self.last_chat_model = None
-            event = self._record_routing_event(
+            self._record_routing_event(
                 selection=selection,
                 actual_model=None,
                 backend="deterministic_fallback",
@@ -180,10 +184,14 @@ class OpenAIService:
                 content = response.choices[0].message.content or ""
                 usage = getattr(response, "usage", None)
                 input_tokens = getattr(usage, "prompt_tokens", None) if usage else None
-                output_tokens = getattr(usage, "completion_tokens", None) if usage else None
+                output_tokens = (
+                    getattr(usage, "completion_tokens", None) if usage else None
+                )
                 self.last_chat_backend = "openai"
                 self.last_chat_model = model_name
-                fallback_used = bool(selection and model_name != selection.selected_model)
+                fallback_used = bool(
+                    selection and model_name != selection.selected_model
+                )
                 self._record_routing_event(
                     selection=selection,
                     actual_model=model_name,
@@ -288,15 +296,21 @@ class OpenAIService:
     ) -> dict[str, Any]:
         event = {
             "task_type": selection.requested_task_type.value if selection else None,
-            "base_model": selection.base_model if selection else self.settings.openai_model,
-            "selected_model": selection.selected_model if selection else self.settings.openai_model,
+            "base_model": selection.base_model
+            if selection
+            else self.settings.openai_model,
+            "selected_model": selection.selected_model
+            if selection
+            else self.settings.openai_model,
             "actual_model_used": actual_model,
             "escalated": selection.escalated if selection else False,
             "escalation_reason": selection.escalation_reason if selection else None,
             "fallback_used": fallback_used,
             "reviewer_triggered": selection.reviewer_required if selection else False,
             "reviewer_reasons": list(selection.reviewer_reasons) if selection else [],
-            "routing_policy_version": selection.routing_policy_version if selection else None,
+            "routing_policy_version": selection.routing_policy_version
+            if selection
+            else None,
             "backend": backend,
             "success": success,
             "latency_ms": latency_ms,
@@ -379,7 +393,9 @@ class OpenAIService:
         # Lightweight node classification table (new NL pipeline) — never emit graph JSON.
         if "classify each" in lower and ("node type" in lower or "node name" in lower):
             return self._demo_classify_nodes(user)
-        if "extract" in lower and ("graph" in lower or "nodes" in lower or "natural language" in lower):
+        if "extract" in lower and (
+            "graph" in lower or "nodes" in lower or "natural language" in lower
+        ):
             # Legacy path: kept for any remaining callers; prefer classification-only demos.
             if "do not generate json" in lower or "classification table" in lower:
                 return self._demo_classify_nodes(user)
@@ -413,7 +429,10 @@ class OpenAIService:
             return json.dumps({"intent": intent, "confidence": 0.75})
         if json_mode:
             return json.dumps(
-                {"result": "demo_mode", "message": "OpenAI unavailable; using deterministic fallback."}
+                {
+                    "result": "demo_mode",
+                    "message": "OpenAI unavailable; using deterministic fallback.",
+                }
             )
         return "Demo mode: OpenAI API key not configured. Using deterministic QA heuristics."
 
@@ -433,13 +452,17 @@ class OpenAIService:
 
         rows = ["Node Name | Node Type"]
         for name in names:
-            ntype = infer_node_type(name, is_failure="fail" in name.lower() or "timeout" in name.lower())
+            ntype = infer_node_type(
+                name, is_failure="fail" in name.lower() or "timeout" in name.lower()
+            )
             rows.append(f"{name} | {ntype.value}")
         return "\n".join(rows)
 
     def _demo_nl_to_graph(self, user: str) -> dict[str, Any]:
         text = user
-        match = re.search(r"(?:description|text|input)\s*[:\-]\s*(.+)", text, re.I | re.S)
+        match = re.search(
+            r"(?:description|text|input)\s*[:\-]\s*(.+)", text, re.I | re.S
+        )
         body = match.group(1).strip() if match else text
         lower = body.lower()
 
@@ -570,7 +593,11 @@ class OpenAIService:
                 }
                 for k in kids
             ]
-            branches = [b for b in branches if b["name"] not in nested_names and b["name"] != "Email + Password"]
+            branches = [
+                b
+                for b in branches
+                if b["name"] not in nested_names and b["name"] != "Email + Password"
+            ]
             branches.insert(0, email)
 
         return {

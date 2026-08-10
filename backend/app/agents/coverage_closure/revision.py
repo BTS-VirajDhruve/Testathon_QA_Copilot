@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.dedup import deduplicate_tests
-from app.agents.evidence import build_evidence_catalog, evidence_for_path_bugs_and_requirements, sanitize_evidence
+from app.agents.evidence import (
+    build_evidence_catalog,
+    evidence_for_path_bugs_and_requirements,
+    sanitize_evidence,
+)
 from app.agents.test_review_automation import (
     apply_safe_corrections,
     apply_validity_hardening,
@@ -49,7 +53,9 @@ def revise_test_from_findings(
     iteration: int,
 ) -> TestCase:
     """Apply safe corrections and fill obvious gaps while preserving logical ID."""
-    findings = [f for f in review.per_test_findings if f.test_case_id == tc.test_case_id]
+    findings = [
+        f for f in review.per_test_findings if f.test_case_id == tc.test_case_id
+    ]
     if tc.do_not_edit or tc.human_edited:
         return tc
 
@@ -79,7 +85,9 @@ def revise_test_from_findings(
         )
     )
     if needs_expected_fix:
-        if (updated.expected_result or "").strip() and has_observable_outcome(updated.expected_result):
+        if (updated.expected_result or "").strip() and has_observable_outcome(
+            updated.expected_result
+        ):
             pass
         elif (updated.expected_result or "").strip():
             updated.expected_result = (
@@ -120,7 +128,9 @@ def revise_test_from_findings(
         or "vague_title" in blob
         or ("vague" in blob and "title" in blob)
     ):
-        updated.title = f"Validate {' → '.join(path or ['feature'])} returns expected status"
+        updated.title = (
+            f"Validate {' → '.join(path or ['feature'])} returns expected status"
+        )
 
     # Final hardening pass clears remaining soft gates (observability tokens, etc.)
     hardened, _ = apply_validity_hardening(updated)
@@ -130,7 +140,9 @@ def revise_test_from_findings(
     updated.revision_version = int(tc.revision_version or 1) + 1
     updated.generation_round = iteration
     updated.generation_method = updated.generation_method or "revision"
-    updated.reviewer_finding_ids = list(dict.fromkeys((tc.reviewer_finding_ids or []) + finding_ids))
+    updated.reviewer_finding_ids = list(
+        dict.fromkeys((tc.reviewer_finding_ids or []) + finding_ids)
+    )
     updated.revision_summary = "; ".join(f.revision_instruction for f in findings)[:500]
     updated.reasoning = updated.revision_summary or updated.reasoning
     return updated
@@ -150,10 +162,18 @@ def create_test_for_obligation(
     category = "functional"
     technique = "Requirements-based testing"
     title = obligation.title
-    if otype in (ObligationType.NEGATIVE_FLOW, ObligationType.VALIDATION, ObligationType.FAILURE_PATH):
+    if otype in (
+        ObligationType.NEGATIVE_FLOW,
+        ObligationType.VALIDATION,
+        ObligationType.FAILURE_PATH,
+    ):
         category = "negative"
         technique = "Negative testing / fault injection"
-        title = title if title.lower().startswith("negative") else f"Negative: {obligation.title}"
+        title = (
+            title
+            if title.lower().startswith("negative")
+            else f"Negative: {obligation.title}"
+        )
     elif otype == ObligationType.HISTORICAL_BUG_REGRESSION:
         category = "regression"
         technique = "Historical-bug regression testing"
@@ -171,7 +191,11 @@ def create_test_for_obligation(
         technique = "Role-based access testing"
 
     expected = default_observable_expected(title, path)
-    if otype in (ObligationType.NEGATIVE_FLOW, ObligationType.FAILURE_PATH, ObligationType.VALIDATION):
+    if otype in (
+        ObligationType.NEGATIVE_FLOW,
+        ObligationType.FAILURE_PATH,
+        ObligationType.VALIDATION,
+    ):
         expected = (
             f"The system rejects or fails safely for '{obligation.title}' and surfaces an "
             f"error message or validation status without corrupting persisted state."
@@ -200,7 +224,9 @@ def create_test_for_obligation(
         test_case_id=new_id("TC"),
         title=title[:160],
         category=category,
-        priority=obligation.priority if isinstance(obligation.priority, Priority) else Priority.HIGH,
+        priority=obligation.priority
+        if isinstance(obligation.priority, Priority)
+        else Priority.HIGH,
         risk=RiskLevel.HIGH
         if obligation.priority in (Priority.CRITICAL, Priority.HIGH)
         else RiskLevel.MEDIUM,
@@ -310,7 +336,10 @@ def apply_revision_plan(
         if not obl:
             continue
         # Skip insufficient evidence obligations — do not fabricate
-        if obl.unsupported_reason or obl.obligation_type == ObligationType.INSUFFICIENT_EVIDENCE:
+        if (
+            obl.unsupported_reason
+            or obl.obligation_type == ObligationType.INSUFFICIENT_EVIDENCE
+        ):
             continue
         # Already covered by an active non-retired test linked to obligation
         if any(
@@ -321,7 +350,9 @@ def apply_revision_plan(
         new_cases.append(created)
 
     existing_list = list(by_id.values())
-    unique_new = deduplicate_tests(new_cases, against=[t for t in existing_list if not t.retired])
+    unique_new = deduplicate_tests(
+        new_cases, against=[t for t in existing_list if not t.retired]
+    )
     stats["duplicates_removed"] += max(0, len(new_cases) - len(unique_new))
     stats["tests_created"] = len(unique_new)
     for tc in unique_new:

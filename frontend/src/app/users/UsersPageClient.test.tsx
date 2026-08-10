@@ -19,6 +19,18 @@ describe("UsersPageClient access + shell rendering", () => {
     authMock.mockReset();
   });
 
+  it("renders session shimmer while auth is loading", () => {
+    authMock.mockReturnValue({
+      status: "loading",
+      session: { user: null },
+    });
+
+    const html = renderToStaticMarkup(createElement(UsersPageClient));
+    expect(html).toContain("Checking session");
+    expect(html).not.toContain("Invite user");
+    expect(html).not.toContain("Redirecting to login");
+  });
+
   it("renders restricted panel for unauthorized role", () => {
     authMock.mockReturnValue({
       status: "authenticated",
@@ -29,7 +41,7 @@ describe("UsersPageClient access + shell rendering", () => {
     expect(html).toContain("Access restricted");
     expect(html).toContain("Back to workspace");
     expect(html).toContain("QA Copilot");
-    expect(html).not.toContain("Create user");
+    expect(html).not.toContain("Invite user");
   });
 
   it("renders management sections for admin role in app-like shell", () => {
@@ -41,7 +53,7 @@ describe("UsersPageClient access + shell rendering", () => {
     const html = renderToStaticMarkup(createElement(UsersPageClient));
     expect(html).toContain("QA Copilot");
     expect(html).toContain("User Management");
-    expect(html).toContain("Create user");
+    expect(html).toContain("Invite user");
     expect(html).toContain("panel p-5");
   });
 });

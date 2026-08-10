@@ -6,13 +6,14 @@ from collections.abc import Callable
 from typing import Any
 
 from app.agents.bdd import build_generated_artifacts
+from app.agents.coverage_closure import RefinementLimits, run_refinement_loop
 from app.agents.coverage_gaps import (
     build_coverage_gaps,
     build_coverage_snapshot,
     gaps_still_open,
     select_gaps_for_regeneration,
 )
-from app.agents.dedup import deduplicate_tests, dedupe_strings
+from app.agents.dedup import dedupe_strings, deduplicate_tests
 from app.agents.specialists import (
     BugReportAgent,
     CoverageAgent,
@@ -26,7 +27,6 @@ from app.agents.specialists import (
     run_premium_reviewer_pass,
 )
 from app.agents.test_review_automation import TestReviewAutomationAgent
-from app.agents.coverage_closure import RefinementLimits, run_refinement_loop
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
@@ -45,8 +45,8 @@ from app.models.schemas import (
     AutomationCapabilityProfile,
     AutomationSummary,
     BDDScenario,
-    CoverageGap,
     ConvergenceReport,
+    CoverageGap,
     CoverageObligation,
     GeneratedTestArtifact,
     ObligationCoverageMatch,
@@ -94,10 +94,19 @@ class QAOrchestrator:
         self._progress_completed: list[str] = []
 
     def _trace(
-        self, steps: list[AgentTraceStep], step: str, detail: str = "", status: str = "complete"
+        self,
+        steps: list[AgentTraceStep],
+        step: str,
+        detail: str = "",
+        status: str = "complete",
     ) -> None:
-        steps.append(AgentTraceStep(step=step, status=status, detail=detail, timestamp=utc_now()))
-        if status in {"complete", "error", "skipped"} and step not in self._progress_completed:
+        steps.append(
+            AgentTraceStep(step=step, status=status, detail=detail, timestamp=utc_now())
+        )
+        if (
+            status in {"complete", "error", "skipped"}
+            and step not in self._progress_completed
+        ):
             self._progress_completed.append(step)
         self._emit_progress(step, detail, status)
 
@@ -110,7 +119,9 @@ class QAOrchestrator:
             return
         elapsed_ms = 0
         if self._progress_started is not None:
-            elapsed_ms = int((utc_now() - self._progress_started).total_seconds() * 1000)
+            elapsed_ms = int(
+                (utc_now() - self._progress_started).total_seconds() * 1000
+            )
         try:
             self._progress_cb(
                 step,
@@ -143,7 +154,12 @@ class QAOrchestrator:
         trace: list[AgentTraceStep] = []
         project = self.store.get_project(request.project_id)
         if not project:
-            self._trace(trace, "Identify Project", f"Project {request.project_id} not found", "error")
+            self._trace(
+                trace,
+                "Identify Project",
+                f"Project {request.project_id} not found",
+                "error",
+            )
             return QACopilotResponse(
                 project_id=request.project_id,
                 query=request.query,
@@ -154,7 +170,9 @@ class QAOrchestrator:
                 assumptions=["Valid project_id is required."],
             )
 
-        self._trace(trace, "Identify Project", f"{project.get('name')} ({request.project_id})")
+        self._trace(
+            trace, "Identify Project", f"{project.get('name')} ({request.project_id})"
+        )
         self._begin_stage("Reading system-flow graph", "Loading project flow graph")
 
         from app.services.openai_service import get_openai_service
@@ -174,7 +192,11 @@ class QAOrchestrator:
         if root:
             self._trace(trace, "Root Feature Identified", root.name)
             branches = self.traversal.branches(request.project_id, root.id)
-            self._trace(trace, f"{len(branches)} Branches Found", ", ".join(b.name for b in branches))
+            self._trace(
+                trace,
+                f"{len(branches)} Branches Found",
+                ", ".join(b.name for b in branches),
+            )
             paths = self.traversal.discover_paths(request.project_id, root.id)
             self._trace(
                 trace,
@@ -183,10 +205,14 @@ class QAOrchestrator:
             )
         else:
             branches, paths = [], []
-            self._trace(trace, "Root Feature Identified", "No root feature in graph", "skipped")
+            self._trace(
+                trace, "Root Feature Identified", "No root feature in graph", "skipped"
+            )
 
         intent = self.classifier.classify(request.query)
-        self._begin_stage("Retrieving project knowledge", "Planning Graph RAG + Vector RAG retrieval")
+        self._begin_stage(
+            "Retrieving project knowledge", "Planning Graph RAG + Vector RAG retrieval"
+        )
         self._trace(trace, "Classify Intent", intent.value)
 
         plan, fused = self.fusion.fuse(
@@ -197,19 +223,30 @@ class QAOrchestrator:
         )
         self._trace(trace, "Plan Retrieval", plan.reason)
         if plan.use_user_flow_graph:
-            self._trace(trace, "Traverse User Flow Graph", f"{len(fused.flow_paths)} paths in fused context")
+            self._trace(
+                trace,
+                "Traverse User Flow Graph",
+                f"{len(fused.flow_paths)} paths in fused context",
+            )
         if plan.use_graph_rag:
-            self._trace(trace, "Traverse Graph RAG", f"{len(fused.graph_context)} graph context items")
+            self._trace(
+                trace,
+                "Traverse Graph RAG",
+                f"{len(fused.graph_context)} graph context items",
+            )
         if plan.use_vector_rag:
             self._trace(
                 trace,
                 f"Vector RAG Retrieved {len(fused.semantic_context)} Documents",
                 ", ".join(
-                    str(s.get("source_reference") or s.get("id")) for s in fused.semantic_context[:5]
+                    str(s.get("source_reference") or s.get("id"))
+                    for s in fused.semantic_context[:5]
                 ),
             )
         if plan.use_existing_tests:
-            self._trace(trace, f"{len(fused.existing_coverage)} Existing Test Cases Found")
+            self._trace(
+                trace, f"{len(fused.existing_coverage)} Existing Test Cases Found"
+            )
         if plan.use_historical_bugs:
             self._trace(trace, f"{len(fused.historical_risks)} Historical Bugs Found")
 
@@ -221,7 +258,11 @@ class QAOrchestrator:
             or changed
             or wants_complete
         ):
-            target = changed or self._extract_changed_node(request.query) or (root_name or "")
+            target = (
+                changed
+                or self._extract_changed_node(request.query)
+                or (root_name or "")
+            )
             if target:
                 impact = self.impact_agent.analyze(request.project_id, target)
                 self._trace(
@@ -231,15 +272,21 @@ class QAOrchestrator:
                     f"risk={impact.risk_level.value}",
                 )
             elif wants_complete:
-                self._trace(trace, "Analyze Impact", "No root/changed node available", "skipped")
+                self._trace(
+                    trace, "Analyze Impact", "No root/changed node available", "skipped"
+                )
 
         coverage = None
-        if intent in (
-            QAIntent.COVERAGE_GAP,
-            QAIntent.TEST_GENERATION,
-            QAIntent.GENERAL_QA,
-            QAIntent.REGRESSION,
-        ) or "coverage" in request.query.lower():
+        if (
+            intent
+            in (
+                QAIntent.COVERAGE_GAP,
+                QAIntent.TEST_GENERATION,
+                QAIntent.GENERAL_QA,
+                QAIntent.REGRESSION,
+            )
+            or "coverage" in request.query.lower()
+        ):
             coverage = self.coverage_agent.analyze(request.project_id, root_name)
             self._trace(
                 trace,
@@ -247,12 +294,16 @@ class QAOrchestrator:
                 f"overall={coverage.overall_coverage}% gaps={len(coverage.critical_gaps)}",
             )
 
-        self._trace(trace, "Analyze Risk", "Computing risk from history + gaps + external deps")
+        self._trace(
+            trace, "Analyze Risk", "Computing risk from history + gaps + external deps"
+        )
         risk = self.risk_agent.assess(fused, coverage)
         self._trace(trace, "Risk Analysis Complete", risk.value)
 
         router = get_model_router()
-        primary_task = router.intent_to_task_type(intent.value) or LLMTaskType.TEST_CASE_GENERATION
+        primary_task = (
+            router.intent_to_task_type(intent.value) or LLMTaskType.TEST_CASE_GENERATION
+        )
         user_requested_review = any(
             k in request.query.lower()
             for k in ("expert review", "deep review", "premium review", "senior review")
@@ -308,7 +359,9 @@ class QAOrchestrator:
         )
         if coverage is not None:
             section_status["coverage"] = SectionStatus(
-                status="success" if coverage.critical_gaps or coverage.overall_coverage is not None else "empty",
+                status="success"
+                if coverage.critical_gaps or coverage.overall_coverage is not None
+                else "empty",
                 count=len(coverage.critical_gaps or []),
             )
 
@@ -320,61 +373,69 @@ class QAOrchestrator:
             "test_validity_review",
             "automation_feasibility_review",
         }
-        want_test_review = (
-            request.include_test_review
-            and (
-                wants_complete
-                or review_only
-                or bool(
-                    requested
-                    & {
-                        "test_automation_review",
-                        "automation_review",
-                        "test_review",
-                        "test_validity_review",
-                        "automation_feasibility_review",
-                        "test_cases",
-                        "tests",
-                    }
-                )
-                or intent
-                in (
-                    QAIntent.TEST_GENERATION,
-                    QAIntent.GENERAL_QA,
-                    QAIntent.REQUIREMENTS_ANALYSIS,
-                    QAIntent.REGRESSION,
-                    QAIntent.COVERAGE_GAP,
-                )
+        want_test_review = request.include_test_review and (
+            wants_complete
+            or review_only
+            or bool(
+                requested
+                & {
+                    "test_automation_review",
+                    "automation_review",
+                    "test_review",
+                    "test_validity_review",
+                    "automation_feasibility_review",
+                    "test_cases",
+                    "tests",
+                }
+            )
+            or intent
+            in (
+                QAIntent.TEST_GENERATION,
+                QAIntent.GENERAL_QA,
+                QAIntent.REQUIREMENTS_ANALYSIS,
+                QAIntent.REGRESSION,
+                QAIntent.COVERAGE_GAP,
             )
         )
-        want_tests = wants_complete or bool(
-            requested & {"test_cases", "tests"}
-        ) or intent in (
-            QAIntent.TEST_GENERATION,
-            QAIntent.GENERAL_QA,
-            QAIntent.REQUIREMENTS_ANALYSIS,
-            QAIntent.REGRESSION,
-            QAIntent.COVERAGE_GAP,
+        want_tests = (
+            wants_complete
+            or bool(requested & {"test_cases", "tests"})
+            or intent
+            in (
+                QAIntent.TEST_GENERATION,
+                QAIntent.GENERAL_QA,
+                QAIntent.REQUIREMENTS_ANALYSIS,
+                QAIntent.REGRESSION,
+                QAIntent.COVERAGE_GAP,
+            )
         )
-        want_exploratory = wants_complete or bool(
-            requested & {"exploratory_scenarios", "exploratory"}
-        ) or intent in (
-            QAIntent.TEST_GENERATION,
-            QAIntent.GENERAL_QA,
-            QAIntent.REQUIREMENTS_ANALYSIS,
-            QAIntent.EXPLORATORY,
+        want_exploratory = (
+            wants_complete
+            or bool(requested & {"exploratory_scenarios", "exploratory"})
+            or intent
+            in (
+                QAIntent.TEST_GENERATION,
+                QAIntent.GENERAL_QA,
+                QAIntent.REQUIREMENTS_ANALYSIS,
+                QAIntent.EXPLORATORY,
+            )
         )
-        want_bugs = wants_complete or bool(
-            requested & {"bug_reports", "bugs"}
-        ) or intent == QAIntent.BUG_REPORT
-        want_regression = wants_complete or bool(
-            requested & {"regression_recommendations", "regression"}
-        ) or intent in (
-            QAIntent.TEST_GENERATION,
-            QAIntent.GENERAL_QA,
-            QAIntent.REQUIREMENTS_ANALYSIS,
-            QAIntent.REGRESSION,
-            QAIntent.IMPACT_ANALYSIS,
+        want_bugs = (
+            wants_complete
+            or bool(requested & {"bug_reports", "bugs"})
+            or intent == QAIntent.BUG_REPORT
+        )
+        want_regression = (
+            wants_complete
+            or bool(requested & {"regression_recommendations", "regression"})
+            or intent
+            in (
+                QAIntent.TEST_GENERATION,
+                QAIntent.GENERAL_QA,
+                QAIntent.REQUIREMENTS_ANALYSIS,
+                QAIntent.REGRESSION,
+                QAIntent.IMPACT_ANALYSIS,
+            )
         )
         # Automation-only: reuse persisted tests; do not regenerate the suite
         if review_only:
@@ -434,7 +495,9 @@ class QAOrchestrator:
                     routing_context=routing_ctx,
                     user_intent=intent.value,
                 )
-                methods = {tc.generation_method for tc in test_cases if tc.generation_method}
+                methods = {
+                    tc.generation_method for tc in test_cases if tc.generation_method
+                }
                 self._trace(
                     trace,
                     "Initial Test Generation",
@@ -461,7 +524,9 @@ class QAOrchestrator:
             try:
                 if intent == QAIntent.EXPLORATORY or want_exploratory:
                     exploratory = self.exploratory_agent.generate(fused)
-                    self._trace(trace, "Exploratory Missions Generated", str(len(exploratory)))
+                    self._trace(
+                        trace, "Exploratory Missions Generated", str(len(exploratory))
+                    )
                     section_status["exploratory_scenarios"] = SectionStatus(
                         status="success" if exploratory else "empty",
                         count=len(exploratory),
@@ -471,7 +536,9 @@ class QAOrchestrator:
                 section_status["exploratory_scenarios"] = SectionStatus(
                     status="failed", count=0, error=str(exc)[:240]
                 )
-                self._trace(trace, "Exploratory Missions Generated", str(exc)[:160], "error")
+                self._trace(
+                    trace, "Exploratory Missions Generated", str(exc)[:160], "error"
+                )
 
         if want_bugs:
             try:
@@ -497,7 +564,9 @@ class QAOrchestrator:
                     coverage=coverage,
                     generated_tests=test_cases,
                 )
-                self._trace(trace, "Regression Recommendation Generation", str(len(regressions)))
+                self._trace(
+                    trace, "Regression Recommendation Generation", str(len(regressions))
+                )
                 section_status["regression_recommendations"] = SectionStatus(
                     status="success" if regressions else "empty",
                     count=len(regressions),
@@ -507,11 +576,22 @@ class QAOrchestrator:
                 section_status["regression_recommendations"] = SectionStatus(
                     status="failed", count=0, error=str(exc)[:240]
                 )
-                self._trace(trace, "Regression Recommendation Generation", str(exc)[:160], "error")
+                self._trace(
+                    trace,
+                    "Regression Recommendation Generation",
+                    str(exc)[:160],
+                    "error",
+                )
 
         if intent == QAIntent.COVERAGE_GAP and coverage:
-            self._trace(trace, "Coverage Gaps Identified", ", ".join(coverage.uncovered_branches[:6]))
-            if not test_cases and ("generate" in request.query.lower() and "test" in request.query.lower()):
+            self._trace(
+                trace,
+                "Coverage Gaps Identified",
+                ", ".join(coverage.uncovered_branches[:6]),
+            )
+            if not test_cases and (
+                "generate" in request.query.lower() and "test" in request.query.lower()
+            ):
                 try:
                     test_cases = self.test_agent.generate(
                         request.query,
@@ -592,13 +672,18 @@ class QAOrchestrator:
                 f"({coverage_before.covered_paths}/{coverage_before.total_paths})",
             )
 
-            max_rounds = max(0, min(int(request.max_regeneration_rounds), MAX_REGENERATION_ROUNDS_HARD))
+            max_rounds = max(
+                0,
+                min(int(request.max_regeneration_rounds), MAX_REGENERATION_ROUNDS_HARD),
+            )
             max_gaps = max(0, int(request.max_gaps_per_round))
 
             for round_idx in range(1, max_rounds + 1):
                 selected = select_gaps_for_regeneration(all_gaps, max_gaps=max_gaps)
                 # Skip gaps already closed in prior round
-                closed_ids = {tc.closes_gap_id for tc in targeted_tests if tc.closes_gap_id}
+                closed_ids = {
+                    tc.closes_gap_id for tc in targeted_tests if tc.closes_gap_id
+                }
                 selected = [g for g in selected if g.gap_id not in closed_ids]
                 if not selected:
                     self._trace(
@@ -609,9 +694,16 @@ class QAOrchestrator:
                     )
                     break
 
-                selected_gaps = selected if round_idx == 1 else selected_gaps + [
-                    g for g in selected if g.gap_id not in {x.gap_id for x in selected_gaps}
-                ]
+                selected_gaps = (
+                    selected
+                    if round_idx == 1
+                    else selected_gaps
+                    + [
+                        g
+                        for g in selected
+                        if g.gap_id not in {x.gap_id for x in selected_gaps}
+                    ]
+                )
                 self._trace(
                     trace,
                     "Gap Prioritization",
@@ -678,7 +770,9 @@ class QAOrchestrator:
                 )
                 # Default policy: only round 1 unless explicitly configured for 2
                 # and high-priority gaps remain. Never auto-loop further.
-                remaining_high = select_gaps_for_regeneration(all_gaps, max_gaps=max_gaps)
+                remaining_high = select_gaps_for_regeneration(
+                    all_gaps, max_gaps=max_gaps
+                )
                 if round_idx >= max_rounds or not remaining_high:
                     break
 
@@ -709,16 +803,23 @@ class QAOrchestrator:
             unresolved = [
                 g
                 for g in all_gaps
-                if (g.priority.value if hasattr(g.priority, "value") else str(g.priority))
+                if (
+                    g.priority.value
+                    if hasattr(g.priority, "value")
+                    else str(g.priority)
+                )
                 in ("critical", "high")
             ]
             self._trace(trace, "Improve Output", f"{len(test_cases)} final test cases")
 
         evidence = ["User-provided system flow graph"]
         evidence.extend(
-            str(s.get("source_reference") or s.get("id")) for s in fused.semantic_context[:5]
+            str(s.get("source_reference") or s.get("id"))
+            for s in fused.semantic_context[:5]
         )
-        evidence.extend(str(b.get("bug_id") or b.get("title")) for b in fused.historical_risks[:5])
+        evidence.extend(
+            str(b.get("bug_id") or b.get("title")) for b in fused.historical_risks[:5]
+        )
         evidence = [e for e in evidence if e]
 
         assumptions = [
@@ -732,7 +833,11 @@ class QAOrchestrator:
                 "No vector documents matched; recommendations rely more on graph structure."
             )
 
-        confidence = ConfidenceLevel.HIGH if fused.flow_paths and test_cases else ConfidenceLevel.MEDIUM
+        confidence = (
+            ConfidenceLevel.HIGH
+            if fused.flow_paths and test_cases
+            else ConfidenceLevel.MEDIUM
+        )
         if not graph.nodes:
             confidence = ConfidenceLevel.LOW
 
@@ -750,11 +855,16 @@ class QAOrchestrator:
         )
 
         from app.rag.vector_store import get_vector_store
-        from app.core.config import get_settings
 
         methods = {tc.generation_method for tc in test_cases if tc.generation_method}
-        if methods == {"llm"} or (methods <= {"llm", "critic"} and "llm" in methods and "deterministic_fallback" not in methods):
-            generation_backend = "openai" if openai.available else "deterministic_fallback"
+        if methods == {"llm"} or (
+            methods <= {"llm", "critic"}
+            and "llm" in methods
+            and "deterministic_fallback" not in methods
+        ):
+            generation_backend = (
+                "openai" if openai.available else "deterministic_fallback"
+            )
         elif "deterministic_fallback" in methods and "llm" not in methods:
             generation_backend = "deterministic_fallback"
         elif methods:
@@ -772,7 +882,11 @@ class QAOrchestrator:
             "Reviewer Decision",
             (
                 f"required={reviewer_decision.required}"
-                + (f" · {', '.join(reviewer_decision.reasons)}" if reviewer_decision.reasons else "")
+                + (
+                    f" · {', '.join(reviewer_decision.reasons)}"
+                    if reviewer_decision.reasons
+                    else ""
+                )
             ),
             "complete" if reviewer_decision.required else "skipped",
         )
@@ -833,7 +947,10 @@ class QAOrchestrator:
             prior_obls: list[CoverageObligation] | None = None
             if request.resume_refinement:
                 prev = self.store.get_latest_analysis(request.project_id) or {}
-                if isinstance(prev, dict) and prev.get("project_id") == request.project_id:
+                if (
+                    isinstance(prev, dict)
+                    and prev.get("project_id") == request.project_id
+                ):
                     prior_hist = [
                         RefinementIterationSnapshot.model_validate(x)
                         for x in (prev.get("iteration_history") or [])
@@ -845,7 +962,9 @@ class QAOrchestrator:
                     if prev.get("test_cases"):
                         # Prefer continuing from persisted suite when resuming
                         try:
-                            test_cases = [TestCase.model_validate(t) for t in prev["test_cases"]]
+                            test_cases = [
+                                TestCase.model_validate(t) for t in prev["test_cases"]
+                            ]
                         except Exception:
                             pass
 
@@ -888,16 +1007,26 @@ class QAOrchestrator:
                         else "partial_success"
                     ),
                     count=len([t for t in test_cases if not t.retired]),
-                    iterations=convergence_report.iterations_completed if convergence_report else 0,
+                    iterations=convergence_report.iterations_completed
+                    if convergence_report
+                    else 0,
                     modeled_coverage=(
-                        convergence_report.final_modeled_coverage if convergence_report else None
+                        convergence_report.final_modeled_coverage
+                        if convergence_report
+                        else None
                     ),
-                    invalid=convergence_report.invalid_after if convergence_report else None,
+                    invalid=convergence_report.invalid_after
+                    if convergence_report
+                    else None,
                     needs_revision=(
-                        convergence_report.needs_revision_after if convergence_report else None
+                        convergence_report.needs_revision_after
+                        if convergence_report
+                        else None
                     ),
                     remaining_mandatory_obligations=(
-                        len(convergence_report.remaining_obligations) if convergence_report else None
+                        len(convergence_report.remaining_obligations)
+                        if convergence_report
+                        else None
                     ),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -919,7 +1048,9 @@ class QAOrchestrator:
                 f"Loaded {len(test_cases)} tests for validity-first review",
             )
             try:
-                profile_raw = self.store.get_automation_capability_profile(request.project_id)
+                profile_raw = self.store.get_automation_capability_profile(
+                    request.project_id
+                )
                 profile = (
                     AutomationCapabilityProfile.model_validate(profile_raw)
                     if profile_raw
@@ -932,18 +1063,21 @@ class QAOrchestrator:
                     if t.get("test_case_id")
                 }
                 targeted_ids = {tc.test_case_id for tc in targeted_tests}
-                reviewed_test_cases, validity_summary, automation_summary, review_meta = (
-                    self.test_review_agent.review(
-                        test_cases=test_cases,
-                        project_id=request.project_id,
-                        fused=fused,
-                        targeted_ids=targeted_ids,
-                        existing_ids=existing_ids,
-                        profile=profile,
-                        overrides=overrides,
-                        automation_strategy=request.automation_strategy,
-                        routing_context=routing_ctx,
-                    )
+                (
+                    reviewed_test_cases,
+                    validity_summary,
+                    automation_summary,
+                    review_meta,
+                ) = self.test_review_agent.review(
+                    test_cases=test_cases,
+                    project_id=request.project_id,
+                    fused=fused,
+                    targeted_ids=targeted_ids,
+                    existing_ids=existing_ids,
+                    profile=profile,
+                    overrides=overrides,
+                    automation_strategy=request.automation_strategy,
+                    routing_context=routing_ctx,
                 )
                 # Enrich suite with safe corrections without dropping originals
                 corrected_by_id = {
@@ -967,22 +1101,26 @@ class QAOrchestrator:
                 }
                 if soft_ids:
                     hardened = harden_suite_tests(test_cases)
-                    reviewed_test_cases, validity_summary, automation_summary, review_meta = (
-                        self.test_review_agent.review(
-                            test_cases=hardened,
-                            project_id=request.project_id,
-                            fused=fused,
-                            targeted_ids=targeted_ids,
-                            existing_ids=existing_ids,
-                            profile=profile,
-                            overrides=overrides,
-                            automation_strategy=request.automation_strategy,
-                            routing_context=routing_ctx,
-                            force_deterministic=True,
-                        )
+                    (
+                        reviewed_test_cases,
+                        validity_summary,
+                        automation_summary,
+                        review_meta,
+                    ) = self.test_review_agent.review(
+                        test_cases=hardened,
+                        project_id=request.project_id,
+                        fused=fused,
+                        targeted_ids=targeted_ids,
+                        existing_ids=existing_ids,
+                        profile=profile,
+                        overrides=overrides,
+                        automation_strategy=request.automation_strategy,
+                        routing_context=routing_ctx,
+                        force_deterministic=True,
                     )
                     corrected_by_id = {
-                        r.test_case.test_case_id: r.test_case for r in reviewed_test_cases
+                        r.test_case.test_case_id: r.test_case
+                        for r in reviewed_test_cases
                     }
                     test_cases = [
                         corrected_by_id.get(tc.test_case_id, tc) for tc in hardened
@@ -1161,7 +1299,8 @@ class QAOrchestrator:
             insufficient_evidence_tests = [
                 item.test_case
                 for item in active_reviewed
-                if item.validity_review.validity == TestValidity.INSUFFICIENT_EVIDENCE.value
+                if item.validity_review.validity
+                == TestValidity.INSUFFICIENT_EVIDENCE.value
             ]
             # Primary user-facing suite is valid-only after silent refinement
             test_cases = [t for t in valid_tests if not getattr(t, "retired", False)]
@@ -1172,7 +1311,9 @@ class QAOrchestrator:
                 f"(hidden needs_revision={len(needs_revision_tests)} invalid={len(invalid_tests)})",
             )
             try:
-                profile_raw = self.store.get_automation_capability_profile(request.project_id)
+                profile_raw = self.store.get_automation_capability_profile(
+                    request.project_id
+                )
                 profile = (
                     AutomationCapabilityProfile.model_validate(profile_raw)
                     if profile_raw
@@ -1201,7 +1342,9 @@ class QAOrchestrator:
                     other = auto_by_id.get(tid)
                     if other and other.automation_review:
                         merged.append(
-                            r.model_copy(update={"automation_review": other.automation_review})
+                            r.model_copy(
+                                update={"automation_review": other.automation_review}
+                            )
                         )
                     else:
                         merged.append(r)
@@ -1269,9 +1412,15 @@ class QAOrchestrator:
                     status="failed", error=str(exc)[:240]
                 )
         elif want_test_review:
-            section_status["test_review_automation"] = SectionStatus(status="empty", count=0)
-            section_status["test_validity_review"] = SectionStatus(status="empty", count=0)
-            section_status["automation_feasibility_review"] = SectionStatus(status="empty", count=0)
+            section_status["test_review_automation"] = SectionStatus(
+                status="empty", count=0
+            )
+            section_status["test_validity_review"] = SectionStatus(
+                status="empty", count=0
+            )
+            section_status["automation_feasibility_review"] = SectionStatus(
+                status="empty", count=0
+            )
             self._trace(
                 trace,
                 "Load Final Test Suite",
@@ -1285,7 +1434,8 @@ class QAOrchestrator:
             "task_type": primary_task.value,
             "base_model": selection.base_model,
             "selected_model": selection.selected_model,
-            "actual_model_used": last_route.get("actual_model_used") or openai.last_chat_model,
+            "actual_model_used": last_route.get("actual_model_used")
+            or openai.last_chat_model,
             "escalated": selection.escalated,
             "escalation_reason": selection.escalation_reason,
             "fallback_used": bool(last_route.get("fallback_used")),
@@ -1339,12 +1489,14 @@ class QAOrchestrator:
                     if ev.source_id
                 }
                 try:
-                    generated_artifacts, bdd_scenarios, bdd_meta = build_generated_artifacts(
-                        test_cases,
-                        output_format=output_format,
-                        feature_name=root_name,
-                        valid_node_names=valid_nodes,
-                        evidence_ids=evidence_ids,
+                    generated_artifacts, bdd_scenarios, bdd_meta = (
+                        build_generated_artifacts(
+                            test_cases,
+                            output_format=output_format,
+                            feature_name=root_name,
+                            valid_node_names=valid_nodes,
+                            evidence_ids=evidence_ids,
+                        )
                     )
                     self._trace(
                         trace,
@@ -1366,23 +1518,32 @@ class QAOrchestrator:
                     status = "success"
                     if bdd_meta.get("needs_revision") and bdd_meta.get("converted_ok"):
                         status = "partial_success"
-                    elif bdd_meta.get("bdd_count", 0) == 0 and output_format != TestOutputFormat.STANDARD:
+                    elif (
+                        bdd_meta.get("bdd_count", 0) == 0
+                        and output_format != TestOutputFormat.STANDARD
+                    ):
                         status = "failed" if test_cases else "empty"
                     section_status["test_case_generation"] = SectionStatus(
-                        status=status if bdd_scenarios or output_format == TestOutputFormat.STANDARD else "partial_success",
+                        status=status
+                        if bdd_scenarios or output_format == TestOutputFormat.STANDARD
+                        else "partial_success",
                         count=len(test_cases),
                         requested_format=output_format.value,
                         logical_test_count=len(test_cases),
                         standard_count=bdd_meta.get("standard_count"),
                         bdd_count=bdd_meta.get("bdd_count"),
-                        validation_errors=list(bdd_meta.get("validation_errors") or [])[:20],
+                        validation_errors=list(bdd_meta.get("validation_errors") or [])[
+                            :20
+                        ],
                     )
                     # Persist BDD side-car on matching test records without overwriting human edits
                     for artifact in generated_artifacts:
                         if not artifact.bdd_scenario or not artifact.source_test_id:
                             continue
                         existing = None
-                        key = self.store.artifact_key(request.project_id, artifact.source_test_id)
+                        key = self.store.artifact_key(
+                            request.project_id, artifact.source_test_id
+                        )
                         existing = self.store.test_cases.get(key)
                         if existing and existing.get("human_edited"):
                             continue
@@ -1390,12 +1551,16 @@ class QAOrchestrator:
                             **(existing or {}),
                             "project_id": request.project_id,
                             "test_case_id": artifact.source_test_id,
-                            "bdd_scenario": artifact.bdd_scenario.model_dump(mode="json"),
+                            "bdd_scenario": artifact.bdd_scenario.model_dump(
+                                mode="json"
+                            ),
                             "logical_test_id": artifact.logical_test_id,
                             "test_output_format": output_format.value,
                         }
                         if artifact.standard_test_case and not existing:
-                            payload.update(artifact.standard_test_case.model_dump(mode="json"))
+                            payload.update(
+                                artifact.standard_test_case.model_dump(mode="json")
+                            )
                         self.store.upsert_test_case(request.project_id, payload)
                     self.store.persist()
                     self._trace(
@@ -1436,7 +1601,9 @@ class QAOrchestrator:
                             bdd_count=0,
                             error=str(exc)[:240],
                         )
-                    self._trace(trace, "BDD Scenario Rendering", str(exc)[:160], "error")
+                    self._trace(
+                        trace, "BDD Scenario Rendering", str(exc)[:160], "error"
+                    )
             else:
                 generated_artifacts, _, std_meta = build_generated_artifacts(
                     test_cases,
@@ -1512,7 +1679,8 @@ class QAOrchestrator:
             graph_coverage=final_coverage_pct,
             critical_gaps=final_critical,
             historical_bug_patterns=[
-                str(b.get("title") or b.get("bug_id")) for b in fused.historical_risks[:10]
+                str(b.get("title") or b.get("bug_id"))
+                for b in fused.historical_risks[:10]
             ],
             test_cases=test_cases,
             exploratory_missions=exploratory,
@@ -1586,7 +1754,9 @@ class QAOrchestrator:
             logger.warning("latest_analysis_persist_failed", error=str(exc))
         return response
 
-    def _wants_complete_analysis(self, request: QACopilotRequest, intent: QAIntent) -> bool:
+    def _wants_complete_analysis(
+        self, request: QACopilotRequest, intent: QAIntent
+    ) -> bool:
         """True when the user asked for a full multi-section QA analysis."""
         requested = {o.strip().lower() for o in (request.requested_outputs or []) if o}
         complete_markers = {

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from app.core.logging import get_logger
 from app.graph.node_typing import infer_node_type, rel_for_child
@@ -47,7 +48,9 @@ class FlowGraphIngester:
 
         provenance = Provenance(
             source_type=source_type,
-            source_reference="json_import" if source_type == SourceType.USER_INPUT else "nl_extraction",
+            source_reference="json_import"
+            if source_type == SourceType.USER_INPUT
+            else "nl_extraction",
             confidence=confidence,
             inferred=inferred,
         )
@@ -67,8 +70,15 @@ class FlowGraphIngester:
         def add_branch(parent: GraphNode, branch: NestedBranch | str) -> None:
             if isinstance(branch, str):
                 branch = NestedBranch(name=branch)
-            is_failure = branch.is_failure_path or "failure" in branch.name.lower() or "lockout" in branch.name.lower()
-            is_external = branch.is_external_dependency or branch.type == NodeType.EXTERNAL_DEPENDENCY
+            is_failure = (
+                branch.is_failure_path
+                or "failure" in branch.name.lower()
+                or "lockout" in branch.name.lower()
+            )
+            is_external = (
+                branch.is_external_dependency
+                or branch.type == NodeType.EXTERNAL_DEPENDENCY
+            )
             is_critical = bool(branch.is_critical) or branch.criticality is not None
             child = GraphNode(
                 id=new_id("node"),
@@ -143,7 +153,9 @@ class FlowGraphIngester:
         graph = self.from_nested_import(
             project_id,
             result.nested,
-            source_type=SourceType.LLM_INFERENCE if result.inferred else SourceType.USER_INPUT,
+            source_type=SourceType.LLM_INFERENCE
+            if result.inferred
+            else SourceType.USER_INPUT,
             inferred=result.inferred,
             confidence=result.confidence,
         )
@@ -175,7 +187,9 @@ class FlowGraphIngester:
         )
         # Attach pipeline stats on root metadata for diagnostics (non-breaking)
         if graph.nodes:
-            root = next((n for n in graph.nodes if n.id == graph.root_node_id), graph.nodes[0])
+            root = next(
+                (n for n in graph.nodes if n.id == graph.root_node_id), graph.nodes[0]
+            )
             root.metadata = {
                 **dict(root.metadata or {}),
                 "nl_pipeline_stats": {
@@ -209,7 +223,9 @@ class FlowGraphIngester:
         )
         return saved
 
-    def merge_artifact_node(self, node: GraphNode, edges: list[GraphEdge] | None = None) -> GraphNode:
+    def merge_artifact_node(
+        self, node: GraphNode, edges: list[GraphEdge] | None = None
+    ) -> GraphNode:
         """Add QA artifacts without destroying user flow graph."""
         saved = self.store.upsert_node(node)
         try:

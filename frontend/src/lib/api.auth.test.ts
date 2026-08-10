@@ -253,6 +253,23 @@ describe("api auth session behavior", () => {
     expect(String(init?.body)).toContain("newPassword");
   });
 
+  it("accepts invite token without auth headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ success: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await api.authAcceptInvite({
+      token: "invite-token-1234567890123456",
+      newPassword: "UpdatedPass123!",
+    });
+
+    expect(response.success).toBe(true);
+    const request = fetchMock.mock.calls[0];
+    const init = request[1] as RequestInit | undefined;
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBeNull();
+    expect(init?.method).toBe("POST");
+  });
+
   it("propagates reset token errors from backend", async () => {
     const fetchMock = vi
       .fn()

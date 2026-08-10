@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.manual_tests import ManualScenarioInput, validate_scenario_steps
 from app.agents.taxonomy import (
     build_normalized_tags,
@@ -23,6 +21,7 @@ from app.models.enums import (
     TestSource,
 )
 from app.models.schemas import BDDStep, TestCase, TestClassification
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -51,14 +50,14 @@ def _isolate(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import app
-
-    return TestClient(app)
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def test_normalize_classification_old_test():
-    tc = TestCase(title="Reject blank name", category="negative", priority=Priority.HIGH)
+    tc = TestCase(
+        title="Reject blank name", category="negative", priority=Priority.HIGH
+    )
     cls = normalize_classification(tc)
     assert cls.nature == TestNature.FUNCTIONAL
     assert TestBehavior.NEGATIVE in cls.behavior
@@ -121,7 +120,9 @@ def test_validate_scenario_steps():
 
 
 def test_manual_create_update_delete(client):
-    created = client.post("/api/projects", json={"name": "Manual Suite", "root_feature": "Editor"})
+    created = client.post(
+        "/api/projects", json={"name": "Manual Suite", "root_feature": "Editor"}
+    )
     assert created.status_code == 200
     project_id = created.json()["id"]
     res = client.post(
@@ -146,7 +147,10 @@ def test_manual_create_update_delete(client):
                     "name": "Reject blank item name",
                     "bdd_steps": [
                         {"keyword": "Given", "text": "the admin is creating an item"},
-                        {"keyword": "When", "text": "they leave the name empty and save"},
+                        {
+                            "keyword": "When",
+                            "text": "they leave the name empty and save",
+                        },
                         {"keyword": "Then", "text": "a validation error is shown"},
                     ],
                     "behavior": ["negative"],
@@ -187,8 +191,16 @@ def test_manual_create_update_delete(client):
 
 def test_category_counts_no_double():
     cases = [
-        TestCase(title="A", category="functional", classification=TestClassification(behavior=[TestBehavior.POSITIVE])),
-        TestCase(title="B", category="negative", classification=TestClassification(behavior=[TestBehavior.NEGATIVE])),
+        TestCase(
+            title="A",
+            category="functional",
+            classification=TestClassification(behavior=[TestBehavior.POSITIVE]),
+        ),
+        TestCase(
+            title="B",
+            category="negative",
+            classification=TestClassification(behavior=[TestBehavior.NEGATIVE]),
+        ),
     ]
     counts = category_counts(cases)
     assert counts["all"] == 2

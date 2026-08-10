@@ -29,6 +29,12 @@ export type UserAdminUpdateInput = {
   password?: string;
 };
 
+export type UserInviteInput = {
+  name: string;
+  email: string;
+  role: UserRole;
+};
+
 export function normalizeRole(value: unknown): UserRole {
   if (value === "systemadmin" || value === "admin") return value;
   return "qa";
@@ -69,6 +75,23 @@ export function validateUserUpdateInput(input: UserAdminUpdateInput): string[] {
     errors.push("Password must be at least 8 characters.");
   }
   if (input.role !== undefined && !ALL_USER_ROLES.includes(input.role)) {
+    errors.push("Role is invalid.");
+  }
+  return errors;
+}
+
+export function validateUserInviteInput(input: UserInviteInput): string[] {
+  const errors: string[] = [];
+  if (!input.name.trim()) {
+    errors.push("Name is required.");
+  }
+  const email = input.email.trim();
+  if (!email) {
+    errors.push("Email is required.");
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.push("Email must be valid.");
+  }
+  if (!ALL_USER_ROLES.includes(input.role)) {
     errors.push("Role is invalid.");
   }
   return errors;

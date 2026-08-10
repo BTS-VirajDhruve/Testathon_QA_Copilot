@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable
+from collections.abc import Callable
 
 from app.graph.nl.models import IntermediateNode, IntermediateTree
 from app.graph.node_typing import TYPE_HINTS, infer_node_type
@@ -42,17 +42,55 @@ DEFAULT_CONFIDENCE_THRESHOLD = 0.65
 _CLASS_CACHE: dict[str, tuple[NodeType, float]] = {}
 
 _RULE_PATTERNS: list[tuple[re.Pattern[str], NodeType, float]] = [
-    (re.compile(r"\b(timeout|decline|lockout|failure|invalid|error|reject)\b", re.I), NodeType.FAILURE_PATH, 0.92),
-    (re.compile(r"\b(gateway|provider|external|third[- ]party|upi|oauth)\b", re.I), NodeType.EXTERNAL_DEPENDENCY, 0.88),
-    (re.compile(r"\b(validat|billing form|address)\b", re.I), NodeType.VALIDATION, 0.82),
-    (re.compile(r"\b(rule|promo|discount|gst|policy)\b", re.I), NodeType.BUSINESS_RULE, 0.8),
-    (re.compile(r"\b(session|logged\s*in|authenticated)\b", re.I), NodeType.STATE, 0.85),
+    (
+        re.compile(r"\b(timeout|decline|lockout|failure|invalid|error|reject)\b", re.I),
+        NodeType.FAILURE_PATH,
+        0.92,
+    ),
+    (
+        re.compile(r"\b(gateway|provider|external|third[- ]party|upi|oauth)\b", re.I),
+        NodeType.EXTERNAL_DEPENDENCY,
+        0.88,
+    ),
+    (
+        re.compile(r"\b(validat|billing form|address)\b", re.I),
+        NodeType.VALIDATION,
+        0.82,
+    ),
+    (
+        re.compile(r"\b(rule|promo|discount|gst|policy)\b", re.I),
+        NodeType.BUSINESS_RULE,
+        0.8,
+    ),
+    (
+        re.compile(r"\b(session|logged\s*in|authenticated)\b", re.I),
+        NodeType.STATE,
+        0.85,
+    ),
     (re.compile(r"\b(api|endpoint|rest|graphql)\b", re.I), NodeType.API, 0.9),
     (re.compile(r"\b(service|microservice)\b", re.I), NodeType.SERVICE, 0.88),
-    (re.compile(r"\b(database|db|postgres|mongo|redis)\b", re.I), NodeType.DATABASE, 0.9),
-    (re.compile(r"\b(forgot|alternate|fallback)\b", re.I), NodeType.ALTERNATE_FLOW, 0.8),
-    (re.compile(r"\b(email|password|oauth|sso|saml|oidc|mfa)\b", re.I), NodeType.AUTHENTICATION_METHOD, 0.85),
-    (re.compile(r"\b(guest|registered|checkout|login|sign\s*in|payment|cart)\b", re.I), NodeType.USER_FLOW, 0.7),
+    (
+        re.compile(r"\b(database|db|postgres|mongo|redis)\b", re.I),
+        NodeType.DATABASE,
+        0.9,
+    ),
+    (
+        re.compile(r"\b(forgot|alternate|fallback)\b", re.I),
+        NodeType.ALTERNATE_FLOW,
+        0.8,
+    ),
+    (
+        re.compile(r"\b(email|password|oauth|sso|saml|oidc|mfa)\b", re.I),
+        NodeType.AUTHENTICATION_METHOD,
+        0.85,
+    ),
+    (
+        re.compile(
+            r"\b(guest|registered|checkout|login|sign\s*in|payment|cart)\b", re.I
+        ),
+        NodeType.USER_FLOW,
+        0.7,
+    ),
 ]
 
 
@@ -106,7 +144,10 @@ class NodeClassifier:
                 node.type_confidence = conf
             else:
                 # Keep explicit type; bump confidence if rules agree
-                node.type_confidence = max(node.type_confidence, conf if ntype == node.type else node.type_confidence)
+                node.type_confidence = max(
+                    node.type_confidence,
+                    conf if ntype == node.type else node.type_confidence,
+                )
 
             if node.type_confidence >= self.threshold:
                 rule_hits += 1
@@ -141,7 +182,10 @@ class NodeClassifier:
                             is_failure=node.is_failure_path,
                         )
                         node.type_confidence = max(node.type_confidence, 0.55)
-                    self.cache[_cache_key(node.name)] = (node.type, node.type_confidence)
+                    self.cache[_cache_key(node.name)] = (
+                        node.type,
+                        node.type_confidence,
+                    )
                     _apply_flags(node)
 
         return {

@@ -69,6 +69,15 @@ class ResetPasswordResponse(BaseModel):
     success: bool = True
 
 
+class AcceptInviteRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+    newPassword: str = Field(min_length=8, max_length=256)
+
+
+class AcceptInviteResponse(BaseModel):
+    success: bool = True
+
+
 class TokenPairResponse(BaseModel):
     accessToken: str
     refreshToken: str
@@ -92,3 +101,15 @@ class ChangePasswordRequest(BaseModel):
 
 class ChangePasswordResponse(BaseModel):
     success: bool = True
+
+
+class InviteUserRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=3, max_length=254)
+    role: RoleType = "qa"
+
+
+class InviteUserResponse(BaseModel):
+    success: bool = True
+    message: str
+    email: str

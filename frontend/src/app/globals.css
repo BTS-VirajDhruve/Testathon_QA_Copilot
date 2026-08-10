@@ -65,4 +65,27 @@ body {
   .label {
     @apply text-[11px] uppercase tracking-[0.16em] text-ink-600/70;
   }
+  .auth-loader-shimmer {
+    @apply relative overflow-hidden bg-white/55 shadow-soft ring-1 ring-ink-700/10 backdrop-blur-sm;
+  }
+  .auth-loader-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(244, 247, 245, 0.85),
+      transparent
+    );
+    animation: auth-shimmer-slide 1.35s ease-in-out infinite;
+  }
+}
+
+@keyframes auth-shimmer-slide {
+  100% {
+    transform: translateX(100%);
+  }
 }

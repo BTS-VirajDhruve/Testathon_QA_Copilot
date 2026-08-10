@@ -42,6 +42,19 @@ describe("users route access guard", () => {
     expect(access.message).toContain("Redirecting to login");
   });
 
+  it("waits while session auth is still loading", () => {
+    const access = resolveUsersRouteAccess({
+      authStatus: "loading",
+      role: null,
+      pathname: "/users",
+      search: "?tab=active",
+    });
+    expect(access.state).toBe("loading");
+    expect(access.redirectHref).toBeNull();
+    expect(access.canManage).toBe(false);
+    expect(access.message).toContain("Checking session");
+  });
+
   it("redirects unauthorized users to workspace with explicit notice", () => {
     const access = resolveUsersRouteAccess({
       authStatus: "authenticated",

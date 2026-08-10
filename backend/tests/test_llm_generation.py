@@ -6,10 +6,9 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.specialists import CriticAgent, TestCaseAgent
 from app.models.schemas import CoverageGapResult, FusedContext
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -45,10 +44,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _fused() -> FusedContext:
@@ -183,7 +180,9 @@ def test_llm_success_uses_structured_context(monkeypatch):
 
     agent = TestCaseAgent()
     fused = _fused()
-    cases = agent.generate("Generate comprehensive QA coverage for Sign In.", fused, "proj_1")
+    cases = agent.generate(
+        "Generate comprehensive QA coverage for Sign In.", fused, "proj_1"
+    )
 
     assert mock.chat_json.called
     assert len(cases) == 2
@@ -202,7 +201,10 @@ def test_llm_success_uses_structured_context(monkeypatch):
     assert "authentication_requirements.md#chunk-0" in user_prompt
     assert "Successful email/password login" in user_prompt
     assert "BUG-007" in user_prompt
-    assert "HAS_AUTHENTICATION_METHOD" in user_prompt or "discovered_graph_paths" in user_prompt
+    assert (
+        "HAS_AUTHENTICATION_METHOD" in user_prompt
+        or "discovered_graph_paths" in user_prompt
+    )
 
 
 def test_build_llm_context_sections_preserve_empty_as_unavailable():
@@ -255,7 +257,11 @@ def test_llm_invalid_testcase_items_fall_back_when_none_valid(monkeypatch):
     mock.chat_json.return_value = {
         "test_cases": [
             {"title": "", "steps": []},  # invalid / skipped
-            {"priority": "not-a-real-priority", "title": "x", "steps": ["a"]},  # pydantic fail
+            {
+                "priority": "not-a-real-priority",
+                "title": "x",
+                "steps": ["a"],
+            },  # pydantic fail
         ]
     }
     monkeypatch.setattr("app.agents.specialists.get_openai_service", lambda: mock)
@@ -301,7 +307,9 @@ def test_critic_compatibility_with_llm_cases(monkeypatch):
         critical_gaps=["Uncovered branch: Enterprise SSO"],
         recommended_tests=["Add path coverage for Enterprise SSO"],
     )
-    notes, improved = CriticAgent().review(test_cases=cases, coverage=coverage, fused=fused)
+    notes, improved = CriticAgent().review(
+        test_cases=cases, coverage=coverage, fused=fused
+    )
     assert notes
     assert len(improved) >= len(cases)
     assert all(tc.graph_path for tc in improved)

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
-from app.agents.coverage_closure.convergence import ConvergenceController, RefinementLimits
-from app.agents.coverage_closure.obligations import build_coverage_obligations, category_coverage_summary
+from app.agents.coverage_closure.convergence import (
+    ConvergenceController,
+    RefinementLimits,
+)
+from app.agents.coverage_closure.obligations import (
+    build_coverage_obligations,
+    category_coverage_summary,
+)
 from app.agents.coverage_closure.revision import apply_revision_plan, harden_suite_tests
 from app.agents.coverage_closure.suite_review import build_suite_review
 from app.agents.dedup import deduplicate_tests
@@ -24,7 +31,6 @@ from app.models.schemas import (
     TestSuiteReview,
     ValiditySummary,
 )
-
 
 TraceFn = Callable[[str, str, str], None]
 
@@ -121,7 +127,10 @@ def run_refinement_loop(
     stop_reason = ""
 
     for iteration in range(1, limits.max_iterations + 1):
-        trace("Suite Review — Iteration N".replace("N", str(iteration)), f"reviewing {len(working)} tests")
+        trace(
+            "Suite Review — Iteration N".replace("N", str(iteration)),
+            f"reviewing {len(working)} tests",
+        )
 
         if not force_deterministic_review:
             controller.llm_calls += 1
@@ -139,7 +148,8 @@ def run_refinement_loop(
             if r.test_case and r.test_case.test_case_id
         }
         working = [
-            corrected_by_id.get(t.test_case_id, t) if not t.retired else t for t in working
+            corrected_by_id.get(t.test_case_id, t) if not t.retired else t
+            for t in working
         ]
 
         invalid_count, needs_count = _count_validity(reviewed)
@@ -163,7 +173,8 @@ def run_refinement_loop(
             o.obligation_id
             for o in obligations
             if o.mandatory
-            and o.status not in (ObligationStatus.COVERED, ObligationStatus.INSUFFICIENT_EVIDENCE)
+            and o.status
+            not in (ObligationStatus.COVERED, ObligationStatus.INSUFFICIENT_EVIDENCE)
         ]
         snap = RefinementIterationSnapshot(
             iteration=iteration,
@@ -257,7 +268,9 @@ def run_refinement_loop(
             project_id=project_id,
             iteration=iteration,
             reviewed=reviewed,
-            max_new=max(1, limits.max_tests - len([t for t in working if not t.retired])),
+            max_new=max(
+                1, limits.max_tests - len([t for t in working if not t.retired])
+            ),
         )
         for k, v in stats.items():
             totals[k] = totals.get(k, 0) + v
@@ -340,7 +353,8 @@ def run_refinement_loop(
     remaining_findings = []
     if final_review:
         remaining_findings = [
-            f"{f.finding_type.value}:{f.test_case_id}" for f in final_review.per_test_findings
+            f"{f.finding_type.value}:{f.test_case_id}"
+            for f in final_review.per_test_findings
         ] + [m.title for m in final_review.missing_scenario_findings]
 
     report = controller.build_report(

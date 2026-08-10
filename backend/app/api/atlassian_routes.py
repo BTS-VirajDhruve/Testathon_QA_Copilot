@@ -12,10 +12,14 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
 from app.integrations.atlassian import field_mapping as field_mapping_mod
-from app.integrations.atlassian import oauth
+from app.integrations.atlassian import oauth, source_store
 from app.integrations.atlassian.confluence import get_confluence_adapter
 from app.integrations.atlassian.errors import AtlassianIntegrationError
-from app.integrations.atlassian.import_service import import_sources, remove_source, sync_source
+from app.integrations.atlassian.import_service import (
+    import_sources,
+    remove_source,
+    sync_source,
+)
 from app.integrations.atlassian.jira import get_jira_adapter
 from app.integrations.atlassian.schemas import (
     AtlassianImportRequest,
@@ -24,7 +28,6 @@ from app.integrations.atlassian.schemas import (
     SelectSiteBody,
     SyncSelectedBody,
 )
-from app.integrations.atlassian import source_store
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/integrations/atlassian", tags=["atlassian"])
@@ -46,8 +49,12 @@ def atlassian_connect(
 ) -> RedirectResponse:
     try:
         if not get_graph_store().get_project(qa_project_id):
-            raise AtlassianIntegrationError("PROJECT_MISMATCH", "QA project not found", status_code=404)
-        url = oauth.build_authorize_url(qa_project_id=qa_project_id, return_view=return_view)
+            raise AtlassianIntegrationError(
+                "PROJECT_MISMATCH", "QA project not found", status_code=404
+            )
+        url = oauth.build_authorize_url(
+            qa_project_id=qa_project_id, return_view=return_view
+        )
         return RedirectResponse(url=url, status_code=302)
     except AtlassianIntegrationError as exc:
         raise _http_error(exc) from exc
@@ -66,14 +73,20 @@ def atlassian_callback(
         if error:
             oauth.handle_consent_denied(state, error_description or error)
         if not code or not state:
-            raise AtlassianIntegrationError("OAUTH_STATE_INVALID", "Missing OAuth code/state")
+            raise AtlassianIntegrationError(
+                "OAUTH_STATE_INVALID", "Missing OAuth code/state"
+            )
         payload = oauth.exchange_code(code, state)
         qa_project_id = payload.get("qa_project_id") or ""
         return_view = payload.get("return_view") or "knowledge"
-        qs = urlencode({"view": return_view, "atlassian": "connected", "project": qa_project_id})
+        qs = urlencode(
+            {"view": return_view, "atlassian": "connected", "project": qa_project_id}
+        )
         return RedirectResponse(url=f"{front}/?{qs}", status_code=302)
     except AtlassianIntegrationError as exc:
-        qs = urlencode({"view": "knowledge", "atlassian": "error", "message": exc.message[:180]})
+        qs = urlencode(
+            {"view": "knowledge", "atlassian": "error", "message": exc.message[:180]}
+        )
         return RedirectResponse(url=f"{front}/?{qs}", status_code=302)
 
 
@@ -173,7 +186,10 @@ def confluence_spaces(
         items, next_cursor = get_confluence_adapter().list_spaces(
             query=query, cursor=cursor, limit=limit
         )
-        return {"items": [i.model_dump(mode="json") for i in items], "next_cursor": next_cursor}
+        return {
+            "items": [i.model_dump(mode="json") for i in items],
+            "next_cursor": next_cursor,
+        }
     except AtlassianIntegrationError as exc:
         raise _http_error(exc) from exc
 
@@ -189,7 +205,10 @@ def confluence_pages(
         items, next_cursor = get_confluence_adapter().list_pages(
             space_id, title=title, cursor=cursor, limit=limit
         )
-        return {"items": [i.model_dump(mode="json") for i in items], "next_cursor": next_cursor}
+        return {
+            "items": [i.model_dump(mode="json") for i in items],
+            "next_cursor": next_cursor,
+        }
     except AtlassianIntegrationError as exc:
         raise _http_error(exc) from exc
 
@@ -197,7 +216,9 @@ def confluence_pages(
 @router.get("/confluence/pages/{page_id}/preview")
 def confluence_page_preview(page_id: str) -> dict[str, Any]:
     try:
-        return get_confluence_adapter().get_page_preview(page_id).model_dump(mode="json")
+        return (
+            get_confluence_adapter().get_page_preview(page_id).model_dump(mode="json")
+        )
     except AtlassianIntegrationError as exc:
         raise _http_error(exc) from exc
 

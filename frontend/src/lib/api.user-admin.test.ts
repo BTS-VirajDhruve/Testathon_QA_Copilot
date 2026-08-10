@@ -74,4 +74,25 @@ describe("api user admin methods", () => {
       status: 501,
     });
   });
+
+  it("invites a user using dedicated invite endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        success: true,
+        message: "Invitation email sent successfully.",
+        email: "invitee@example.com",
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await api.inviteUser({
+      name: "Invitee",
+      email: "invitee@example.com",
+      role: "qa",
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.email).toBe("invitee@example.com");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/users/invite");
+  });
 });

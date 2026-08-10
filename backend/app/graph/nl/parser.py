@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from app.graph.nl.models import IntermediateNode, IntermediateTree, PreprocessResult
 from app.models.enums import NodeType, Priority
@@ -40,8 +40,16 @@ _ROOT_RE = re.compile(
 )
 
 _SECTION_HINTS: list[tuple[re.Pattern[str], NodeType | None, dict]] = [
-    (re.compile(r"failure\s+paths?", re.I), NodeType.FAILURE_PATH, {"is_failure_path": True}),
-    (re.compile(r"external\s+dependenc", re.I), NodeType.EXTERNAL_DEPENDENCY, {"is_external_dependency": True}),
+    (
+        re.compile(r"failure\s+paths?", re.I),
+        NodeType.FAILURE_PATH,
+        {"is_failure_path": True},
+    ),
+    (
+        re.compile(r"external\s+dependenc", re.I),
+        NodeType.EXTERNAL_DEPENDENCY,
+        {"is_external_dependency": True},
+    ),
     (re.compile(r"alternate\s+flows?", re.I), NodeType.ALTERNATE_FLOW, {}),
     (re.compile(r"business\s+rules?", re.I), NodeType.BUSINESS_RULE, {}),
     (re.compile(r"\bapis?\b", re.I), NodeType.API, {}),
@@ -69,7 +77,9 @@ def parse_to_tree(pre: PreprocessResult) -> IntermediateTree:
     """Build an IntermediateTree from normalized text using rules only."""
     text = pre.text.strip()
     if not text:
-        root = IntermediateNode(name="Feature", type=NodeType.FEATURE, type_confidence=1.0)
+        root = IntermediateNode(
+            name="Feature", type=NodeType.FEATURE, type_confidence=1.0
+        )
         return IntermediateTree(root=root, description="", stats={"empty": True})
 
     # Prefer explicit bullet hierarchy when present
@@ -112,7 +122,9 @@ def _parse_bullet_tree(pre: PreprocessResult) -> IntermediateTree | None:
     root = IntermediateNode(
         name=root_name,
         type=NodeType.FEATURE,
-        description=" ".join(preamble)[:400] if preamble else f"Root feature: {root_name}",
+        description=" ".join(preamble)[:400]
+        if preamble
+        else f"Root feature: {root_name}",
         type_confidence=1.0,
         is_critical=True,
         criticality=Priority.HIGH,
@@ -163,7 +175,9 @@ def _parse_prose_tree(pre: PreprocessResult) -> IntermediateTree:
             break
 
     if not root_name:
-        root_name = _guess_root_from_preamble([ln for ln in pre.lines if ln.strip()][:3])
+        root_name = _guess_root_from_preamble(
+            [ln for ln in pre.lines if ln.strip()][:3]
+        )
 
     if not root_name:
         # First sentence subject
@@ -229,14 +243,20 @@ def _parse_prose_tree(pre: PreprocessResult) -> IntermediateTree:
                 child = IntermediateNode(
                     name=name,
                     type=ntype,
-                    is_failure_path=bool(flags.get("is_failure_path") or extra.get("is_failure_path")),
+                    is_failure_path=bool(
+                        flags.get("is_failure_path") or extra.get("is_failure_path")
+                    ),
                     is_external_dependency=bool(
-                        flags.get("is_external_dependency") or extra.get("is_external_dependency")
+                        flags.get("is_external_dependency")
+                        or extra.get("is_external_dependency")
                     ),
                     is_critical=bool(flags.get("is_critical")),
                     criticality=flags.get("criticality"),
                     type_confidence=float(flags.get("type_confidence", conf)),
-                    metadata={"source": "prose_relation", "verb": rel.group("verb").lower()},
+                    metadata={
+                        "source": "prose_relation",
+                        "verb": rel.group("verb").lower(),
+                    },
                     description=_trim_desc(raw_child, name),
                 )
                 # Nested "with X and Y" / "including A, B"
@@ -250,7 +270,9 @@ def _parse_prose_tree(pre: PreprocessResult) -> IntermediateTree:
                             name=n2,
                             type=f2.get("type"),
                             is_failure_path=bool(f2.get("is_failure_path")),
-                            is_external_dependency=bool(f2.get("is_external_dependency")),
+                            is_external_dependency=bool(
+                                f2.get("is_external_dependency")
+                            ),
                             type_confidence=float(f2.get("type_confidence", 0.45)),
                             metadata={"source": "nested_with"},
                         )
@@ -260,7 +282,9 @@ def _parse_prose_tree(pre: PreprocessResult) -> IntermediateTree:
 
         # Standalone failure / dependency mentions attached to nearest context
         if _FAILURE_WORDS.search(sent) and len(sent) < 160:
-            name, flags = _annotate_name(sent, {"type": NodeType.FAILURE_PATH, "is_failure_path": True})
+            name, flags = _annotate_name(
+                sent, {"type": NodeType.FAILURE_PATH, "is_failure_path": True}
+            )
             if name and not root.find_by_name(name):
                 # Prefer last feature-like child as parent
                 parent = root.children[-1] if root.children else root
@@ -290,7 +314,11 @@ def _parse_prose_tree(pre: PreprocessResult) -> IntermediateTree:
                 )
             )
 
-    root.description = (" ".join(description_bits)[:400] if description_bits else f"Root feature: {root.name}")
+    root.description = (
+        " ".join(description_bits)[:400]
+        if description_bits
+        else f"Root feature: {root.name}"
+    )
     return IntermediateTree(root=root, description=root.description)
 
 
@@ -368,7 +396,12 @@ def _annotate_name(raw: str, inherit: dict) -> tuple[str, dict]:
     text = raw.strip().rstrip(".")
     # Strip trailing "are failure paths" etc.
     text = re.sub(r"\s+are\s+(a\s+)?failure\s+paths?\.?$", "", text, flags=re.I)
-    text = re.sub(r"\s+is\s+(a\s+)?(?:critical\s+)?(?:external\s+)?failure\s+path\.?$", "", text, flags=re.I)
+    text = re.sub(
+        r"\s+is\s+(a\s+)?(?:critical\s+)?(?:external\s+)?failure\s+path\.?$",
+        "",
+        text,
+        flags=re.I,
+    )
     text = re.sub(r"\s+\((?:external|failure|critical)\)\s*$", "", text, flags=re.I)
 
     if _FAILURE_WORDS.search(text) or flags.get("is_failure_path"):
@@ -401,7 +434,9 @@ def _clean_node_name(raw: str) -> str:
         flags=re.I,
     )
     # Cut at relative clause markers that make names too long
-    s = re.split(r"\b(?:when|where|that|which|if|because|only when)\b", s, maxsplit=1, flags=re.I)[0]
+    s = re.split(
+        r"\b(?:when|where|that|which|if|because|only when)\b", s, maxsplit=1, flags=re.I
+    )[0]
     s = s.strip(" ,;:-")
     # Title-ish cleanup: keep original casing if mixed, else title case short names
     if s.isupper() and len(s) > 3:
@@ -453,7 +488,10 @@ def _subject_of_sentence(sent: str) -> str | None:
     rel = _RELATION_RE.match(sent.strip())
     if rel:
         return _clean_node_name(rel.group("sub"))
-    m = re.match(r"^([A-Z][\w][\w\s+\-/]{0,48}?)(?:\s+(?:is|are|supports|has|includes)\b|,)", sent)
+    m = re.match(
+        r"^([A-Z][\w][\w\s+\-/]{0,48}?)(?:\s+(?:is|are|supports|has|includes)\b|,)",
+        sent,
+    )
     if m:
         return _clean_node_name(m.group(1))
     tokens = sent.split()

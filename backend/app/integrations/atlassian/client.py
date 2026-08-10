@@ -54,7 +54,9 @@ class AtlassianHttpClient:
                 **(headers or {}),
             }
             try:
-                with httpx.Client(timeout=self.settings.atlassian_request_timeout_seconds) as client:
+                with httpx.Client(
+                    timeout=self.settings.atlassian_request_timeout_seconds
+                ) as client:
                     resp = client.request(
                         method,
                         url,
@@ -73,7 +75,11 @@ class AtlassianHttpClient:
                 continue
             if resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After")
-                delay = float(retry_after) if retry_after and retry_after.isdigit() else min(2**attempt, 16)
+                delay = (
+                    float(retry_after)
+                    if retry_after and retry_after.isdigit()
+                    else min(2**attempt, 16)
+                )
                 if attempt < retries:
                     time.sleep(delay)
                     continue
@@ -83,7 +89,11 @@ class AtlassianHttpClient:
                     status_code=429,
                 )
             if resp.status_code in {403}:
-                code = JIRA_PERMISSION_DENIED if product == "jira" else CONFLUENCE_PERMISSION_DENIED
+                code = (
+                    JIRA_PERMISSION_DENIED
+                    if product == "jira"
+                    else CONFLUENCE_PERMISSION_DENIED
+                )
                 raise AtlassianIntegrationError(
                     code,
                     f"Permission denied for {product} resource",

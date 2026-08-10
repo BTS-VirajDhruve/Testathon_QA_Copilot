@@ -6,8 +6,6 @@ Does not ask the LLM to sort gaps.
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.agents.dedup import dedupe_strings
 from app.agents.evidence import (
     build_evidence_catalog,
@@ -145,7 +143,11 @@ def build_coverage_gaps(
 ) -> list[CoverageGap]:
     """Derive structured gaps from CoverageEngine + uncovered graph paths + bugs."""
     gaps: list[CoverageGap] = []
-    root = (coverage.root_feature if coverage else None) or fused.feature_context.get("name") or "Feature"
+    root = (
+        (coverage.root_feature if coverage else None)
+        or fused.feature_context.get("name")
+        or "Feature"
+    )
     seen: set[str] = set()
 
     def _add(gap: CoverageGap) -> None:
@@ -161,12 +163,16 @@ def build_coverage_gaps(
             continue
         joined = " → ".join(path)
         is_failure = any(
-            k in joined.lower() for k in ("fail", "invalid", "lockout", "timeout", "error")
+            k in joined.lower()
+            for k in ("fail", "invalid", "lockout", "timeout", "error")
         )
         is_external = any(
-            k in joined.lower() for k in ("oauth", "sso", "saml", "oidc", "provider", "google")
+            k in joined.lower()
+            for k in ("oauth", "sso", "saml", "oidc", "provider", "google")
         )
-        is_alt = any(k in joined.lower() for k in ("forgot", "reset", "recovery", "alternate"))
+        is_alt = any(
+            k in joined.lower() for k in ("forgot", "reset", "recovery", "alternate")
+        )
         if is_failure:
             gtype, priority, risk = GapType.FAILURE, Priority.HIGH, RiskLevel.HIGH
         elif is_external:
@@ -174,7 +180,11 @@ def build_coverage_gaps(
         elif is_alt:
             gtype, priority, risk = GapType.ALTERNATE, Priority.MEDIUM, RiskLevel.MEDIUM
         else:
-            gtype, priority, risk = GapType.GRAPH_PATH, Priority.MEDIUM, RiskLevel.MEDIUM
+            gtype, priority, risk = (
+                GapType.GRAPH_PATH,
+                Priority.MEDIUM,
+                RiskLevel.MEDIUM,
+            )
         title = f"Uncovered graph path: {joined}"
         evidence = _gap_evidence(
             path, fused, gap_title=title, relevance="Uncovered discovered leaf path"
@@ -206,7 +216,11 @@ def build_coverage_gaps(
     for branch in coverage.uncovered_branches:
         path = _find_path_for_name(branch, fused, root)
         branch_l = branch.lower()
-        is_critical = branch_l in critical_branch_names or "sso" in branch_l or "oauth" in branch_l
+        is_critical = (
+            branch_l in critical_branch_names
+            or "sso" in branch_l
+            or "oauth" in branch_l
+        )
         priority = Priority.HIGH if is_critical else Priority.MEDIUM
         risk = RiskLevel.HIGH if is_critical else RiskLevel.MEDIUM
         title = f"Uncovered branch: {branch}"
@@ -255,7 +269,10 @@ def build_coverage_gaps(
         path = _find_path_for_name(name, fused, root)
         title = f"Uncovered external dependency: {name}"
         evidence = _gap_evidence(
-            path, fused, gap_title=title, relevance="Uncovered external dependency boundary"
+            path,
+            fused,
+            gap_title=title,
+            relevance="Uncovered external dependency boundary",
         )
         _add(
             CoverageGap(
@@ -324,7 +341,9 @@ def build_coverage_gaps(
             ),
         ]
         evidence.extend(
-            evidence_for_path_bugs_and_requirements(path, fused, build_evidence_catalog(fused))[:4]
+            evidence_for_path_bugs_and_requirements(
+                path, fused, build_evidence_catalog(fused)
+            )[:4]
         )
         _add(
             CoverageGap(
@@ -375,7 +394,9 @@ def build_coverage_gaps(
         if covered:
             continue
         # Only elevate to high when requirement text signals must/critical/shall
-        urgent = any(k in content.lower() for k in ("must ", "critical", "shall ", "required"))
+        urgent = any(
+            k in content.lower() for k in ("must ", "critical", "shall ", "required")
+        )
         path = [root] if root else []
         title = f"Requirement without test: {req_title}"
         evidence = [
@@ -465,8 +486,10 @@ def build_coverage_snapshot(
     gaps: list[CoverageGap] | None = None,
 ) -> CoverageSnapshot:
     """Build explainable before/after coverage snapshot."""
-    structured = gaps if gaps is not None else build_coverage_gaps(
-        coverage=coverage, fused=fused, test_cases=test_cases
+    structured = (
+        gaps
+        if gaps is not None
+        else build_coverage_gaps(coverage=coverage, fused=fused, test_cases=test_cases)
     )
     total, covered, path_pct = compute_path_coverage(fused.flow_paths, test_cases)
     overall = coverage.overall_coverage if coverage else path_pct
@@ -486,11 +509,17 @@ def build_coverage_snapshot(
         branch_coverage=branch,
         gaps=structured,
         critical_gaps=dedupe_strings(
-            list(coverage.critical_gaps) if coverage else [
-                g.title for g in structured if _as_priority(g.priority) in REGENERATION_PRIORITIES
+            list(coverage.critical_gaps)
+            if coverage
+            else [
+                g.title
+                for g in structured
+                if _as_priority(g.priority) in REGENERATION_PRIORITIES
             ][:12]
         ),
-        uncovered_branches=dedupe_strings(list(coverage.uncovered_branches) if coverage else []),
+        uncovered_branches=dedupe_strings(
+            list(coverage.uncovered_branches) if coverage else []
+        ),
         calculation_notes=notes,
     )
 

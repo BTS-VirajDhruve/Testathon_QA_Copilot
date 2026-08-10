@@ -39,10 +39,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def test_copilot_query_stream_emits_progress_and_complete(client):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import get_settings
+from app.integrations.atlassian import token_store
 from app.integrations.atlassian.adf import adf_to_text
 from app.integrations.atlassian.client import get_atlassian_client
 from app.integrations.atlassian.field_mapping import load_mapping
@@ -16,7 +17,6 @@ from app.integrations.atlassian.schemas import (
     JiraIssueSummary,
     JiraProjectSummary,
 )
-from app.integrations.atlassian import token_store
 
 
 def _site_url() -> str:
@@ -32,7 +32,9 @@ def _field_text(value: Any) -> str:
     if isinstance(value, dict) and value.get("type") == "doc":
         return adf_to_text(value)
     if isinstance(value, dict):
-        return str(value.get("value") or value.get("name") or value.get("displayName") or "")
+        return str(
+            value.get("value") or value.get("name") or value.get("displayName") or ""
+        )
     if isinstance(value, list):
         return ", ".join(_field_text(v) for v in value if v is not None)
     return str(value)
@@ -96,7 +98,9 @@ class JiraAdapter:
             )
         return out, total
 
-    def search_issues(self, body: dict[str, Any]) -> tuple[list[JiraIssueSummary], str | None]:
+    def search_issues(
+        self, body: dict[str, Any]
+    ) -> tuple[list[JiraIssueSummary], str | None]:
         cloud_id = require_selected_cloud_id()
         jql = build_issue_jql(
             project_key=body.get("project_key"),
@@ -107,7 +111,10 @@ class JiraAdapter:
             labels=body.get("labels") or [],
             advanced_jql=body.get("jql"),
         )
-        max_results = min(int(body.get("max_results") or self.settings.atlassian_default_page_size), 100)
+        max_results = min(
+            int(body.get("max_results") or self.settings.atlassian_default_page_size),
+            100,
+        )
         payload: dict[str, Any] = {
             "jql": jql,
             "maxResults": max_results,
@@ -210,7 +217,9 @@ class JiraAdapter:
         fields = data.get("fields") or {}
         site = _site_url()
         key = str(data.get("key") or issue_key)
-        description = _field_text(fields.get(mapping.description_field) or fields.get("description"))
+        description = _field_text(
+            fields.get(mapping.description_field) or fields.get("description")
+        )
         ac_parts = [
             _field_text(fields.get(fid))
             for fid in mapping.acceptance_criteria_fields
@@ -223,7 +232,11 @@ class JiraAdapter:
             ("Risk", mapping.risk_fields),
             ("Environment", mapping.environment_fields),
         ):
-            parts = [_field_text(fields.get(fid)) for fid in ids if fields.get(fid) is not None]
+            parts = [
+                _field_text(fields.get(fid))
+                for fid in ids
+                if fields.get(fid) is not None
+            ]
             if any(parts):
                 extra[label] = "\n".join(p for p in parts if p)
 
@@ -266,7 +279,9 @@ class JiraAdapter:
         if preview.description_text:
             parts.append("\n## Description\n" + preview.description_text)
         if preview.acceptance_criteria_text:
-            parts.append("\n## Acceptance Criteria\n" + preview.acceptance_criteria_text)
+            parts.append(
+                "\n## Acceptance Criteria\n" + preview.acceptance_criteria_text
+            )
         for name, value in preview.extra_fields.items():
             parts.append(f"\n## {name}\n{value}")
         if preview.url:

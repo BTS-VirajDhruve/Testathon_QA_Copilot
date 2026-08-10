@@ -8,14 +8,15 @@ import { ApiError, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import {
   ALL_USER_ROLES,
-  validateUserCreateInput,
+  validateUserInviteInput,
   validateUserUpdateInput,
-  type UserAdminCreateInput,
+  type UserInviteInput,
   type UserAdminRecord,
   type UserAdminUpdateInput,
   type UserRole,
 } from "@/lib/user-admin";
 import { resolveUsersRouteAccess } from "@/lib/users-access";
+import { AuthSessionShimmer } from "@/components/AuthSessionShimmer";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message;
@@ -30,12 +31,10 @@ function formatDate(value: string | undefined): string {
   return date.toLocaleString();
 }
 
-const defaultCreateState: UserAdminCreateInput = {
+const defaultCreateState: UserInviteInput = {
   name: "",
   email: "",
-  password: "",
   role: "qa",
-  isActive: true,
 };
 
 const defaultEditState: UserAdminUpdateInput = {
@@ -65,7 +64,7 @@ export function UsersPageClient() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | UserRole>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
-  const [createForm, setCreateForm] = useState<UserAdminCreateInput>(defaultCreateState);
+  const [createForm, setCreateForm] = useState<UserInviteInput>(defaultCreateState);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<UserAdminUpdateInput>(defaultEditState);
 
@@ -113,7 +112,7 @@ export function UsersPageClient() {
     });
   }, [items, roleFilter, search, statusFilter]);
 
-  async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
+  async function handleInviteUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!allowManage || saving) return;
     const form = {
@@ -121,7 +120,7 @@ export function UsersPageClient() {
       name: createForm.name.trim(),
       email: createForm.email.trim().toLowerCase(),
     };
-    const validationErrors = validateUserCreateInput(form);
+    const validationErrors = validateUserInviteInput(form);
     if (validationErrors.length > 0) {
       setError(validationErrors.join(" "));
       return;
@@ -131,12 +130,12 @@ export function UsersPageClient() {
     setError(null);
     setSuccess(null);
     try {
-      const created = await api.createUser(form);
-      setItems((prev) => [created, ...prev]);
+      const invited = await api.inviteUser(form);
       setCreateForm(defaultCreateState);
-      setSuccess(`Created user ${created.email}.`);
-    } catch (createError) {
-      setError(getErrorMessage(createError, "Failed to create user."));
+      setSuccess(invited.message);
+      await loadUsers();
+    } catch (inviteError) {
+      setError(getErrorMessage(inviteError, "Failed to send user invitation."));
     } finally {
       setSaving(false);
     }
@@ -213,6 +212,10 @@ export function UsersPageClient() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (access.state === "loading") {
+    return <AuthSessionShimmer />;
   }
 
   if (access.state === "unauthenticated") {
@@ -305,7 +308,7 @@ export function UsersPageClient() {
           <div>
             <h1 className="font-display text-3xl text-ink-900">User Management</h1>
             <p className="mt-1 text-sm text-ink-700/70">
-              Create, update, deactivate, and soft-delete users with role-aware controls.
+              Invite, update, deactivate, and soft-delete users with role-aware controls.
             </p>
           </div>
         </div>
@@ -323,8 +326,8 @@ export function UsersPageClient() {
         )}
 
         <section className="panel p-5">
-          <h2 className="font-display text-xl text-ink-900">Create user</h2>
-          <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={handleCreateUser}>
+          <h2 className="font-display text-xl text-ink-900">Invite user</h2>
+          <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={handleInviteUser}>
             <input
               className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm"
               placeholder="Full name"
@@ -337,15 +340,6 @@ export function UsersPageClient() {
               placeholder="Email"
               value={createForm.email}
               onChange={(event) => setCreateForm((prev) => ({ ...prev, email: event.target.value }))}
-            />
-            <input
-              type="password"
-              className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm"
-              placeholder="Temporary password"
-              value={createForm.password}
-              onChange={(event) =>
-                setCreateForm((prev) => ({ ...prev, password: event.target.value }))
-              }
             />
             <select
               className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm"
@@ -360,20 +354,10 @@ export function UsersPageClient() {
                 </option>
               ))}
             </select>
-            <label className="inline-flex items-center gap-2 text-sm text-ink-700">
-              <input
-                type="checkbox"
-                checked={createForm.isActive}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({ ...prev, isActive: event.target.checked }))
-                }
-              />
-              Active user
-            </label>
             <div className="md:col-span-2">
               <button className="btn-primary" type="submit" disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                Create user
+                Send invite
               </button>
             </div>
           </form>

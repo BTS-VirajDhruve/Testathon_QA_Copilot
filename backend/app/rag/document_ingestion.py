@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger
@@ -45,8 +44,9 @@ def parse_file(filename: str, raw: bytes) -> str:
     lower = filename.lower()
     if lower.endswith(".pdf"):
         try:
-            from pypdf import PdfReader
             import io
+
+            from pypdf import PdfReader
 
             reader = PdfReader(io.BytesIO(raw))
             return "\n\n".join((page.extract_text() or "") for page in reader.pages)
@@ -56,6 +56,7 @@ def parse_file(filename: str, raw: bytes) -> str:
     if lower.endswith(".docx"):
         try:
             import io
+
             from docx import Document
 
             doc = Document(io.BytesIO(raw))
@@ -121,12 +122,23 @@ class DocumentIngester:
         logger.info("document_ingested", document_id=doc_id, chunks=len(chunk_ids))
         return record
 
-    def ingest_bytes(self, project_id: str, filename: str, raw: bytes, content_type: str = "") -> DocumentRecord:
+    def ingest_bytes(
+        self, project_id: str, filename: str, raw: bytes, content_type: str = ""
+    ) -> DocumentRecord:
         text = parse_file(filename, raw)
-        return self.ingest_text(project_id, filename, text, content_type=content_type or "application/octet-stream")
+        return self.ingest_text(
+            project_id,
+            filename,
+            text,
+            content_type=content_type or "application/octet-stream",
+        )
 
     def list_documents(self, project_id: str) -> list[dict[str, Any]]:
-        return [d for d in self.store.documents.values() if d.get("project_id") == project_id]
+        return [
+            d
+            for d in self.store.documents.values()
+            if d.get("project_id") == project_id
+        ]
 
     def get_chunks(self, project_id: str) -> list[DocumentChunk]:
         chunks: list[DocumentChunk] = []

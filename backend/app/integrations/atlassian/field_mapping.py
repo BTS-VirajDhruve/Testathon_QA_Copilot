@@ -22,7 +22,9 @@ def load_mapping(cloud_id: str) -> JiraFieldMapping:
         except Exception:  # noqa: BLE001
             data = {}
     raw = data.get(cloud_id) or {}
-    return JiraFieldMapping(cloud_id=cloud_id, **{k: v for k, v in raw.items() if k != "cloud_id"})
+    return JiraFieldMapping(
+        cloud_id=cloud_id, **{k: v for k, v in raw.items() if k != "cloud_id"}
+    )
 
 
 def save_mapping(mapping: JiraFieldMapping) -> JiraFieldMapping:

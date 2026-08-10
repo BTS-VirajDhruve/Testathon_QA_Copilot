@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.dedup import dedupe_strings
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -41,10 +40,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def test_dedupe_strings_preserves_first_and_order():
@@ -67,9 +64,15 @@ def test_coverage_engine_dedupes_critical_gaps(client):
     from app.models.enums import NodeType
     from app.models.schemas import GraphEdge, GraphNode
 
-    proj = client.post("/api/projects", json={"name": "DupGaps", "root_feature": "Checkout"}).json()
+    proj = client.post(
+        "/api/projects", json={"name": "DupGaps", "root_feature": "Checkout"}
+    ).json()
     store = get_graph_store()
-    root = next(n for n in store.get_project_graph(proj["id"]).nodes if n.type == NodeType.FEATURE)
+    root = next(
+        n
+        for n in store.get_project_graph(proj["id"]).nodes
+        if n.type == NodeType.FEATURE
+    )
     # Two external dependency nodes with the same display name
     for i in range(2):
         dep = GraphNode(
@@ -79,7 +82,9 @@ def test_coverage_engine_dedupes_critical_gaps(client):
             is_external_dependency=True,
         )
         store.upsert_node(dep)
-        store.upsert_edge(GraphEdge(source=root.id, target=dep.id, relationship="DEPENDS_ON"))
+        store.upsert_edge(
+            GraphEdge(source=root.id, target=dep.id, relationship="DEPENDS_ON")
+        )
 
     coverage = get_coverage_engine().analyze(proj["id"], "Checkout")
     gateway_ext = [
@@ -119,7 +124,10 @@ def test_complete_analysis_returns_bugs_and_regression(client):
     assert len(body["regression_recommendations"]) >= 1
     status = body.get("section_status") or {}
     assert status.get("bug_reports", {}).get("status") in {"success", "empty"}
-    assert status.get("regression_recommendations", {}).get("status") in {"success", "empty"}
+    assert status.get("regression_recommendations", {}).get("status") in {
+        "success",
+        "empty",
+    }
     assert status["bug_reports"]["count"] == len(body["bug_reports"])
     # Trace should mention both agents
     steps = " ".join(s.get("step", "") for s in body.get("execution_trace") or [])
@@ -142,9 +150,21 @@ def test_checkout_style_graph_produces_both_sections(client):
                     "name": "Payment",
                     "type": "UserFlow",
                     "children": [
-                        {"name": "Payment Gateway", "type": "ExternalDependency", "is_external_dependency": True},
-                        {"name": "Payment Decline", "type": "FailurePath", "is_failure_path": True},
-                        {"name": "Gateway Timeout", "type": "FailurePath", "is_failure_path": True},
+                        {
+                            "name": "Payment Gateway",
+                            "type": "ExternalDependency",
+                            "is_external_dependency": True,
+                        },
+                        {
+                            "name": "Payment Decline",
+                            "type": "FailurePath",
+                            "is_failure_path": True,
+                        },
+                        {
+                            "name": "Gateway Timeout",
+                            "type": "FailurePath",
+                            "is_failure_path": True,
+                        },
                     ],
                 },
                 {"name": "Order Confirmation", "type": "UserFlow"},
@@ -164,7 +184,9 @@ def test_checkout_style_graph_produces_both_sections(client):
             ],
         },
     ).json()
-    assert body["bug_reports"], "expected candidate bug reports from failure/external paths"
+    assert body["bug_reports"], (
+        "expected candidate bug reports from failure/external paths"
+    )
     assert body["regression_recommendations"], "expected regression recommendations"
     assert "bug_reports" in (body.get("section_status") or {})
 

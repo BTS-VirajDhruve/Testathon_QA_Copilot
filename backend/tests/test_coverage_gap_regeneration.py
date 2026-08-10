@@ -5,8 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.coverage_gaps import (
     build_coverage_gaps,
     build_coverage_snapshot,
@@ -20,8 +18,11 @@ from app.models.schemas import (
     CoverageGap,
     CoverageGapResult,
     FusedContext,
+)
+from app.models.schemas import (
     TestCase as QATestCase,
 )
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -57,10 +58,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _fused(*, include_uncovered_sso: bool = True) -> FusedContext:
@@ -172,9 +171,9 @@ def _covered_cases(fused: FusedContext) -> list[QATestCase]:
     # Link requirement + bug so those gaps close
     cases[0].evidence = []
     cases[-1].source_references = ["BUG-007", "chunk_req_1"]
-    cases[-1].reasoning = (
-        "Covers OAuth callback failure leaves orphan session cookie and Enterprise SSO requirement"
-    )
+    cases[
+        -1
+    ].reasoning = "Covers OAuth callback failure leaves orphan session cookie and Enterprise SSO requirement"
     return cases
 
 
@@ -191,7 +190,9 @@ def test_a_no_high_priority_gaps_skips_targeted_regeneration():
     for c in cases:
         if "Enterprise SSO" in " ".join(c.graph_path):
             c.source_references.append("chunk_req_1")
-            c.reasoning = (c.reasoning or "") + " Enterprise SSO requirement chunk_req_1"
+            c.reasoning = (
+                c.reasoning or ""
+            ) + " Enterprise SSO requirement chunk_req_1"
 
     coverage = CoverageGapResult(
         root_feature="Sign In",
@@ -257,7 +258,10 @@ def test_b_high_priority_gap_produces_targeted_tests():
         uncovered_branches=["Enterprise SSO"],
         uncovered_failure_paths=["Provider Failure"],
         uncovered_dependencies=["Google OAuth"],
-        critical_gaps=["Uncovered branch: Enterprise SSO", "Uncovered failure path: Provider Failure"],
+        critical_gaps=[
+            "Uncovered branch: Enterprise SSO",
+            "Uncovered failure path: Provider Failure",
+        ],
         recommended_tests=["Add path coverage for Enterprise SSO"],
         overall_coverage=20.0,
         branch_coverage=33.0,
@@ -345,7 +349,9 @@ def test_d_targeted_context_contains_gap_path_evidence_and_existing():
         )
     ]
     ctx = TestCaseAgent().build_targeted_context(gap, fused, existing)
-    assert "Generate a test case specifically for this coverage gap" in ctx["instruction"]
+    assert (
+        "Generate a test case specifically for this coverage gap" in ctx["instruction"]
+    )
     assert ctx["coverage_gap"]["title"] == gap.title
     assert ctx["coverage_gap"]["description"] == gap.description
     assert ctx["relevant_graph_path"] == gap.graph_path
@@ -397,7 +403,9 @@ def test_d_targeted_llm_prompt_includes_required_sections(monkeypatch):
 
     cases = TestCaseAgent().generate_for_gap(gap, fused, "proj_1", [])
     assert cases
-    assert "Generate a test case specifically for this coverage gap" in captured["system"]
+    assert (
+        "Generate a test case specifically for this coverage gap" in captured["system"]
+    )
     assert "Generate a test case specifically for this coverage gap" in captured["user"]
     assert gap.description in captured["user"] or gap.title in captured["user"]
     assert "Enterprise SSO" in captured["user"]
@@ -463,7 +471,10 @@ def test_f_duplicate_targeted_tests_not_added():
         QATestCase(
             test_case_id="TC-001",
             title="Gap coverage: Sign In → Enterprise SSO",
-            steps=["Navigate to entry point: Sign In", "Traverse / exercise: Enterprise SSO"],
+            steps=[
+                "Navigate to entry point: Sign In",
+                "Traverse / exercise: Enterprise SSO",
+            ],
             expected_result="User successfully completes Sign In → Enterprise SSO",
             graph_path=["Sign In", "Enterprise SSO"],
         )
@@ -471,7 +482,10 @@ def test_f_duplicate_targeted_tests_not_added():
     dup = QATestCase(
         test_case_id="TC-002",
         title="Gap coverage: Sign In → Enterprise SSO",
-        steps=["Navigate to entry point: Sign In", "Traverse / exercise: Enterprise SSO"],
+        steps=[
+            "Navigate to entry point: Sign In",
+            "Traverse / exercise: Enterprise SSO",
+        ],
         expected_result="User successfully completes Sign In → Enterprise SSO",
         graph_path=["Sign In", "Enterprise SSO"],
     )
@@ -626,7 +640,9 @@ def test_i_coverage_before_after_recalculated():
     for gap in selected:
         all_cases.extend(agent.generate_for_gap(gap, fused, "proj_1", all_cases))
 
-    after = build_coverage_snapshot(coverage=coverage, fused=fused, test_cases=all_cases)
+    after = build_coverage_snapshot(
+        coverage=coverage, fused=fused, test_cases=all_cases
+    )
     assert after.covered_paths >= before.covered_paths
     assert after.coverage_percentage >= before.coverage_percentage
 
@@ -671,14 +687,23 @@ def test_critic_standalone_still_adds_targeted_gap_tests():
         recommended_tests=["Add path coverage for Enterprise SSO"],
     )
     notes, improved = CriticAgent().review(
-        test_cases=base, coverage=coverage, fused=fused, add_gap_tests=True, project_id="proj_1"
+        test_cases=base,
+        coverage=coverage,
+        fused=fused,
+        add_gap_tests=True,
+        project_id="proj_1",
     )
     critic_cases = [c for c in improved if c.generation_method == "critic"]
     assert notes
     assert critic_cases
-    assert any("Enterprise SSO" in ((c.title or "") + (c.reasoning or "")) for c in critic_cases)
+    assert any(
+        "Enterprise SSO" in ((c.title or "") + (c.reasoning or ""))
+        for c in critic_cases
+    )
     assert all(c.evidence for c in critic_cases)
-    assert any(e.source_type == "coverage_gap" for c in critic_cases for e in c.evidence)
+    assert any(
+        e.source_type == "coverage_gap" for c in critic_cases for e in c.evidence
+    )
 
 
 def test_prioritization_order_prefers_critical_paths_and_bugs():

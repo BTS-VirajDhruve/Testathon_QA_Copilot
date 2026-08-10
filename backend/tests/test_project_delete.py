@@ -39,10 +39,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _create(client: TestClient, name: str, root: str | None = None) -> dict:
@@ -118,6 +116,7 @@ def test_delete_project_with_knowledge_and_vectors(client):
     hits = client.get(f"/api/projects/{b['id']}/search", params={"q": "refund"}).json()
     assert isinstance(hits, list)
 
+
 def test_delete_project_with_bugs_and_tests(client):
     from app.graph.store import get_graph_store
 
@@ -148,8 +147,14 @@ def test_delete_project_with_bugs_and_tests(client):
     assert client.get(f"/api/projects/{proj['id']}/bugs").json() == []
     keep_tests = client.get(f"/api/projects/{other['id']}/tests").json()
     keep_bugs = client.get(f"/api/projects/{other['id']}/bugs").json()
-    assert any(t.get("test_case_id") == "TC-KEEP-1" or "TC-KEEP-1" in str(t) for t in keep_tests)
-    assert any(b.get("bug_id") == "BUG-KEEP-1" or "BUG-KEEP-1" in str(b) for b in keep_bugs)
+    assert any(
+        t.get("test_case_id") == "TC-KEEP-1" or "TC-KEEP-1" in str(t)
+        for t in keep_tests
+    )
+    assert any(
+        b.get("bug_id") == "BUG-KEEP-1" or "BUG-KEEP-1" in str(b) for b in keep_bugs
+    )
+
 
 def test_delete_does_not_affect_other_projects(client):
     a = _create(client, "Project A", root="A Root")

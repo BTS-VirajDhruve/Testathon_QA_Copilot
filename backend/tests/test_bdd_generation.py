@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.bdd import (
     build_generated_artifacts,
     convert_test_to_bdd,
@@ -14,6 +12,7 @@ from app.agents.bdd import (
 from app.models.enums import Priority, RiskLevel, TestOutputFormat
 from app.models.schemas import QACopilotRequest, TestCase
 from app.services.model_router import reset_model_router
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -51,10 +50,8 @@ def _isolate_env(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _tc(**kwargs) -> TestCase:
@@ -64,7 +61,10 @@ def _tc(**kwargs) -> TestCase:
         category="functional",
         priority=Priority.HIGH,
         risk=RiskLevel.HIGH,
-        preconditions=["User is inside the intended Journey folder", "Create New Journey form is open"],
+        preconditions=[
+            "User is inside the intended Journey folder",
+            "Create New Journey form is open",
+        ],
         steps=[
             "Enter a valid Journey title",
             "Select a default language",
@@ -84,7 +84,9 @@ def test_request_default_format_is_standard():
 
 
 def test_invalid_format_returns_422(client):
-    project = client.post("/api/projects", json={"name": "P", "description": "d"}).json()
+    project = client.post(
+        "/api/projects", json={"name": "P", "description": "d"}
+    ).json()
     res = client.post(
         "/api/copilot/query",
         json={
@@ -99,7 +101,9 @@ def test_invalid_format_returns_422(client):
 
 
 def test_convert_valid_standard_to_bdd():
-    scenario, status, notes = convert_test_to_bdd(_tc(), feature_name="Create a Journey")
+    scenario, status, notes = convert_test_to_bdd(
+        _tc(), feature_name="Create a Journey"
+    )
     assert status == "ok"
     assert scenario is not None
     assert scenario.feature == "Create a Journey"
@@ -115,8 +119,10 @@ def test_unsafe_conversion_needs_revision():
         feature_name="Create a Journey",
     )
     assert status == "needs_revision"
-    assert "vague_or_missing_expected_result" in notes or scenario is None or (
-        scenario and scenario.conversion_status == "needs_revision"
+    assert (
+        "vague_or_missing_expected_result" in notes
+        or scenario is None
+        or (scenario and scenario.conversion_status == "needs_revision")
     )
 
 
@@ -137,7 +143,15 @@ def test_both_mode_shares_logical_id():
 
 def test_feature_export_is_parseable_gherkin():
     _, scenarios, _ = build_generated_artifacts(
-        [_tc(), _tc(test_case_id="TC-002", title="Reject Journey creation without a title", steps=["Submit the form without a Journey title"], expected_result="The Journey should not be created and a title validation message should be displayed")],
+        [
+            _tc(),
+            _tc(
+                test_case_id="TC-002",
+                title="Reject Journey creation without a title",
+                steps=["Submit the form without a Journey title"],
+                expected_result="The Journey should not be created and a title validation message should be displayed",
+            ),
+        ],
         output_format=TestOutputFormat.BDD,
         feature_name="Create a Journey",
     )
@@ -195,7 +209,9 @@ def test_copilot_bdd_mode(client):
     assert payload["test_output_format"] == "bdd"
     assert payload["test_cases"]  # canonical preserved for coverage/review
     assert isinstance(payload.get("bdd_scenarios"), list)
-    assert payload["section_status"]["test_case_generation"]["requested_format"] == "bdd"
+    assert (
+        payload["section_status"]["test_case_generation"]["requested_format"] == "bdd"
+    )
 
 
 def test_export_feature_endpoint(client):

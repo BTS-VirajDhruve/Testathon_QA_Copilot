@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
-
+from app.models.auth import UserCreateInput
 from app.models.enums import LLMTaskType, RequirementComplexity
 from app.services.model_router import (
     DEFAULT_TASK_MODEL_MAP,
@@ -15,6 +17,7 @@ from app.services.model_router import (
     get_model_router,
     reset_model_router,
 )
+from app.services.user_service import get_user_service
 
 
 @pytest.fixture(autouse=True)
@@ -109,7 +112,9 @@ def test_routing_disabled_uses_global_default(monkeypatch):
 
 
 def test_enabled_tasks_allowlist(monkeypatch):
-    monkeypatch.setenv("MODEL_ROUTING_ENABLED_TASKS", "qa_documentation,regression_selection")
+    monkeypatch.setenv(
+        "MODEL_ROUTING_ENABLED_TASKS", "qa_documentation,regression_selection"
+    )
     import app.core.config as config
 
     config.get_settings.cache_clear()
@@ -181,7 +186,10 @@ def test_reviewer_enabled_triggers(monkeypatch):
 
 def test_intent_to_task_skips_extra_classifier():
     router = get_model_router()
-    assert router.intent_to_task_type("test_generation") == LLMTaskType.TEST_CASE_GENERATION
+    assert (
+        router.intent_to_task_type("test_generation")
+        == LLMTaskType.TEST_CASE_GENERATION
+    )
     assert router.intent_to_task_type("exploratory") == LLMTaskType.EXPLORATORY_SCENARIO
     assert router.intent_to_task_type("bug_report") == LLMTaskType.BUG_REPORT
     assert router.intent_to_task_type("unknown") is None
@@ -202,7 +210,9 @@ def test_model_unavailable_falls_back_to_global(monkeypatch):
     def _create(**kwargs):
         model = kwargs.get("model")
         if model == "gpt-5.6-luna":
-            raise RuntimeError("The model `gpt-5.6-luna` does not exist or you do not have access")
+            raise RuntimeError(
+                "The model `gpt-5.6-luna` does not exist or you do not have access"
+            )
         resp = MagicMock()
         resp.choices = [MagicMock(message=MagicMock(content='{"ok": true}'))]
         resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
@@ -235,7 +245,9 @@ def test_complete_provider_failure_uses_deterministic(monkeypatch):
     oa_mod._openai_service = None
     service = oa_mod.OpenAIService()
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = RuntimeError("rate limit exceeded")
+    mock_client.chat.completions.create.side_effect = RuntimeError(
+        "rate limit exceeded"
+    )
     service._client = mock_client
 
     raw = service.chat(
@@ -282,8 +294,8 @@ def test_agents_pass_task_type_not_model_id():
 
 
 def test_copilot_response_includes_model_routing(monkeypatch):
-    from fastapi.testclient import TestClient
     from app.main import create_app
+    from fastapi.testclient import TestClient
 
     monkeypatch.setenv("OPENAI_API_KEY", "")
     import app.core.config as config
@@ -299,6 +311,24 @@ def test_copilot_response_includes_model_routing(monkeypatch):
     reset_model_router()
 
     client = TestClient(create_app())
+    email = f"routing-admin-{uuid4().hex[:8]}@example.com"
+    password = "SecurePass123!"
+    asyncio.run(
+        get_user_service().create_user(
+            UserCreateInput(
+                name="Routing Test Admin",
+                email=email,
+                password=password,
+                role="admin",
+                isActive=True,
+            )
+        )
+    )
+    login = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert login.status_code == 200
+    token = login.json()["accessToken"]
+    client.headers.update({"Authorization": f"Bearer {token}"})
+
     seed = client.post("/api/demo/seed").json()
     result = client.post(
         "/api/copilot/query",

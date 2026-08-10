@@ -174,7 +174,9 @@ def assess_requirement_complexity(context: ModelRoutingContext) -> ComplexityAss
     return ComplexityAssessment(category=category, score=score, signals=signals)
 
 
-def infer_sensitivity_flags(query: str | None, feature: str | None = None) -> dict[str, bool]:
+def infer_sensitivity_flags(
+    query: str | None, feature: str | None = None
+) -> dict[str, bool]:
     """Cheap keyword heuristics for routing flags — not a security classifier."""
     blob = f"{query or ''} {feature or ''}".lower()
     security = any(
@@ -195,9 +197,19 @@ def infer_sensitivity_flags(query: str | None, feature: str | None = None) -> di
     )
     financial = any(
         k in blob
-        for k in ("payment", "checkout", "billing", "refund", "invoice", "pricing", "cart")
+        for k in (
+            "payment",
+            "checkout",
+            "billing",
+            "refund",
+            "invoice",
+            "pricing",
+            "cart",
+        )
     )
-    release = any(k in blob for k in ("release", "blocker", "production", "p0", "sev-1", "sev1"))
+    release = any(
+        k in blob for k in ("release", "blocker", "production", "p0", "sev-1", "sev1")
+    )
     return {
         "security_sensitive": security,
         "financial_impact": financial,
@@ -263,7 +275,9 @@ def build_routing_context_from_fused(
     return ctx
 
 
-def decide_reviewer(context: ModelRoutingContext, *, quality_failed: bool = False) -> ReviewerDecision:
+def decide_reviewer(
+    context: ModelRoutingContext, *, quality_failed: bool = False
+) -> ReviewerDecision:
     """Conditional expensive reviewer — off by default via settings.model_reviewer_enabled."""
     settings = get_settings()
     if not settings.model_reviewer_enabled:
@@ -281,7 +295,9 @@ def decide_reviewer(context: ModelRoutingContext, *, quality_failed: bool = Fals
     if quality_failed or context.initial_validation_failed:
         reasons.append("quality_check_failed")
     if context.requirement_complexity == RequirementComplexity.HIGH and (
-        context.security_sensitive or context.release_blocking or context.financial_impact
+        context.security_sensitive
+        or context.release_blocking
+        or context.financial_impact
     ):
         reasons.append("high_complexity_critical_context")
 
@@ -372,15 +388,24 @@ class ModelRouter:
                 reasons.append("high requirement complexity")
             if context.security_sensitive and self.settings.model_escalate_on_security:
                 reasons.append("security_sensitive")
-            if context.release_blocking and self.settings.model_escalate_on_release_blocking:
+            if (
+                context.release_blocking
+                and self.settings.model_escalate_on_release_blocking
+            ):
                 reasons.append("release_blocking")
             if context.financial_impact and self.settings.model_escalate_on_financial:
                 reasons.append("financial_impact")
-            if context.initial_validation_failed and self.settings.model_escalate_on_validation_failure:
+            if (
+                context.initial_validation_failed
+                and self.settings.model_escalate_on_validation_failure
+            ):
                 reasons.append("initial structured generation failed")
             if context.user_requested_review:
                 reasons.append("user requested deep review")
-            if context.ambiguity_score >= 0.7 and self.settings.model_escalate_on_ambiguity:
+            if (
+                context.ambiguity_score >= 0.7
+                and self.settings.model_escalate_on_ambiguity
+            ):
                 reasons.append("severe ambiguity")
 
             if reasons:
@@ -393,8 +418,14 @@ class ModelRouter:
             self.settings.model_escalation_enabled
             and task_type == LLMTaskType.TARGETED_TEST_GENERATION
             and (
-                (context.security_sensitive and self.settings.model_escalate_on_security)
-                or (context.release_blocking and self.settings.model_escalate_on_release_blocking)
+                (
+                    context.security_sensitive
+                    and self.settings.model_escalate_on_security
+                )
+                or (
+                    context.release_blocking
+                    and self.settings.model_escalate_on_release_blocking
+                )
             )
         ):
             escalate_target = (

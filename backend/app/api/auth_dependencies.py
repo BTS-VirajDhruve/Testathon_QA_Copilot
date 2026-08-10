@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException, Request, status
 
 from app.core.config import get_settings
-from app.db.mongo import init_mongo, mongo_health_signal
+from app.db.mongo import mongo_health_signal
 from app.models.auth import RoleType, UserPublic
 from app.services.auth_service import AuthService, get_auth_service
 
@@ -18,6 +18,7 @@ _PUBLIC_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/api/auth/logout"),
     ("POST", "/api/auth/forgot-password"),
     ("POST", "/api/auth/reset-password"),
+    ("POST", "/api/auth/accept-invite"),
 }
 _REQUEST_USER_STATE_KEY = "_auth_user"
 
@@ -61,7 +62,6 @@ def _extract_bearer_token(request: Request) -> str:
 
 def _require_auth_service() -> AuthService:
     settings = get_settings()
-    init_mongo()
     mongo = mongo_health_signal()
     if not settings.mongo_enabled or not mongo.get("connected"):
         raise HTTPException(
@@ -79,14 +79,16 @@ def _get_request_user(request: Request) -> UserPublic | None:
     return getattr(request.state, _REQUEST_USER_STATE_KEY, None)
 
 
-def _authenticate_request(request: Request, allow_public: bool) -> UserPublic | None:
+async def _authenticate_request(
+    request: Request, allow_public: bool
+) -> UserPublic | None:
     if allow_public and _is_public_endpoint(request.method, request.url.path):
         return None
 
     token = _extract_bearer_token(request)
     service = _require_auth_service()
     try:
-        user = service.get_user_from_access_token(token)
+        user = await service.get_user_from_access_token(token)
     except HTTPException as exc:
         if exc.status_code == status.HTTP_401_UNAUTHORIZED:
             raise _auth_error(
@@ -105,20 +107,20 @@ def _authenticate_request(request: Request, allow_public: bool) -> UserPublic | 
     return user
 
 
-def require_request_authentication(request: Request) -> UserPublic | None:
+async def require_request_authentication(request: Request) -> UserPublic | None:
     """Default router-level guard: public allowlist bypass, JWT for all others."""
     existing_user = _get_request_user(request)
     if existing_user is not None:
         return existing_user
-    return _authenticate_request(request, allow_public=True)
+    return await _authenticate_request(request, allow_public=True)
 
 
-def get_current_authenticated_user(request: Request) -> UserPublic:
+async def get_current_authenticated_user(request: Request) -> UserPublic:
     """Route-level guard that always requires a valid authenticated user."""
     existing_user = _get_request_user(request)
     if existing_user is not None:
         return existing_user
-    user = _authenticate_request(request, allow_public=False)
+    user = await _authenticate_request(request, allow_public=False)
     if user is None:
         raise _auth_error(
             status.HTTP_401_UNAUTHORIZED,
@@ -128,12 +130,14 @@ def get_current_authenticated_user(request: Request) -> UserPublic:
     return user
 
 
-def require_roles(*allowed_roles: RoleType) -> Callable[[Request], UserPublic]:
+def require_roles(
+    *allowed_roles: RoleType,
+) -> Callable[[Request], Awaitable[UserPublic]]:
     """Create a reusable role guard for route dependencies."""
     allowed: set[str] = set(allowed_roles)
 
-    def _role_dependency(request: Request) -> UserPublic:
-        user = get_current_authenticated_user(request)
+    async def _role_dependency(request: Request) -> UserPublic:
+        user = await get_current_authenticated_user(request)
         if user.role not in allowed:
             raise _auth_error(
                 status.HTTP_403_FORBIDDEN,

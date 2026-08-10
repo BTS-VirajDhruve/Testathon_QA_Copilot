@@ -7,7 +7,7 @@ from typing import Any
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
 from app.graph.traversal import get_traversal
-from app.models.enums import QAIntent, LLMTaskType
+from app.models.enums import LLMTaskType, QAIntent
 from app.models.schemas import FusedContext, RetrievalPlan
 from app.rag.vector_store import get_vector_store
 from app.services.model_router import ModelRoutingContext
@@ -17,7 +17,9 @@ logger = get_logger(__name__)
 
 
 class RetrievalPlanner:
-    def plan(self, query: str, intent: QAIntent, *, has_flow_graph: bool) -> RetrievalPlan:
+    def plan(
+        self, query: str, intent: QAIntent, *, has_flow_graph: bool
+    ) -> RetrievalPlan:
         q = query.lower()
         use_flow = has_flow_graph and (
             intent
@@ -46,13 +48,19 @@ class RetrievalPlanner:
                 )
             )
         )
-        use_vector = intent in {
-            QAIntent.TEST_GENERATION,
-            QAIntent.REQUIREMENTS_ANALYSIS,
-            QAIntent.DOCUMENTATION,
-            QAIntent.GENERAL_QA,
-            QAIntent.EXPLORATORY,
-        } or "requirement" in q or "policy" in q or "security" in q
+        use_vector = (
+            intent
+            in {
+                QAIntent.TEST_GENERATION,
+                QAIntent.REQUIREMENTS_ANALYSIS,
+                QAIntent.DOCUMENTATION,
+                QAIntent.GENERAL_QA,
+                QAIntent.EXPLORATORY,
+            }
+            or "requirement" in q
+            or "policy" in q
+            or "security" in q
+        )
         use_graph = has_flow_graph or intent in {
             QAIntent.IMPACT_ANALYSIS,
             QAIntent.REGRESSION,
@@ -69,11 +77,15 @@ class RetrievalPlanner:
             QAIntent.COVERAGE_GAP,
             QAIntent.GENERAL_QA,
         }
-        use_external = "latest" in q or "cve" in q or "owasp" in q or "external research" in q
+        use_external = (
+            "latest" in q or "cve" in q or "owasp" in q or "external research" in q
+        )
 
         reason_parts = []
         if use_flow:
-            reason_parts.append("branch-level flow understanding from the user-provided system flow graph")
+            reason_parts.append(
+                "branch-level flow understanding from the user-provided system flow graph"
+            )
         if use_graph:
             reason_parts.append("Graph RAG traversal of dependencies and relationships")
         if use_vector:
@@ -102,8 +114,14 @@ class IntentClassifier:
     KEYWORDS: list[tuple[QAIntent, tuple[str, ...]]] = [
         (QAIntent.EXPLORATORY, ("exploratory", "charter", "mission", "break the")),
         (QAIntent.BUG_REPORT, ("bug report", "defect report", "file a bug")),
-        (QAIntent.REGRESSION, ("regression", "recommend tests after", "what to retest")),
-        (QAIntent.IMPACT_ANALYSIS, ("impact", "impacted", "what components", "changed")),
+        (
+            QAIntent.REGRESSION,
+            ("regression", "recommend tests after", "what to retest"),
+        ),
+        (
+            QAIntent.IMPACT_ANALYSIS,
+            ("impact", "impacted", "what components", "changed"),
+        ),
         # Prefer generation when the user explicitly asks to generate tests,
         # even if the same query also mentions coverage gaps (hackathon demo journey).
         (
@@ -118,10 +136,16 @@ class IntentClassifier:
                 "targeted tests",
             ),
         ),
-        (QAIntent.COVERAGE_GAP, ("coverage gap", "uncovered", "missing tests", "coverage analysis")),
+        (
+            QAIntent.COVERAGE_GAP,
+            ("coverage gap", "uncovered", "missing tests", "coverage analysis"),
+        ),
         (QAIntent.DEFECT_PATTERN, ("historical bug", "defect pattern", "recurring")),
         (QAIntent.DOCUMENTATION, ("qa documentation", "write docs", "test plan doc")),
-        (QAIntent.REQUIREMENTS_ANALYSIS, ("analyze requirements", "requirement analysis")),
+        (
+            QAIntent.REQUIREMENTS_ANALYSIS,
+            ("analyze requirements", "requirement analysis"),
+        ),
     ]
 
     def classify(self, query: str) -> QAIntent:
@@ -146,7 +170,9 @@ class IntentClassifier:
         lower = query.lower()
         # Compound demo/product query: generate tests + coverage gaps → generation path
         asks_generate = "generate" in lower and "test" in lower
-        asks_gaps = any(k in lower for k in ("coverage gap", "uncovered", "targeted test"))
+        asks_gaps = any(
+            k in lower for k in ("coverage gap", "uncovered", "targeted test")
+        )
         if asks_generate and asks_gaps:
             return QAIntent.TEST_GENERATION
         for intent, keys in self.KEYWORDS:
@@ -203,13 +229,17 @@ class ContextFusionLayer:
                         {
                             "path": path.node_names,
                             "node_ids": path.node_ids,
-                            "path_id": "→".join(path.node_ids) if path.node_ids else None,
+                            "path_id": "→".join(path.node_ids)
+                            if path.node_ids
+                            else None,
                             "is_failure_path": path.is_failure_path,
                             "includes_external_dependency": path.includes_external_dependency,
                             "relationships": path.relationships,
                         }
                     )
-                for edge, neighbor in self.store.neighbors(root.id, direction="both")[:30]:
+                for edge, neighbor in self.store.neighbors(root.id, direction="both")[
+                    :30
+                ]:
                     graph_context.append(
                         {
                             "node_id": neighbor.id,
@@ -230,7 +260,11 @@ class ContextFusionLayer:
             for tc in self.store.test_cases.values():
                 if tc.get("project_id") != project_id:
                     continue
-                if root and root.name.lower() not in str(tc).lower() and query.split()[0].lower() not in str(tc).lower():
+                if (
+                    root
+                    and root.name.lower() not in str(tc).lower()
+                    and query.split()[0].lower() not in str(tc).lower()
+                ):
                     # still include broadly for demo completeness when few tests
                     pass
                 existing_coverage.append(

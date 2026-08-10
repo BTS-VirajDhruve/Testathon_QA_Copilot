@@ -39,7 +39,9 @@ def tree_to_nested_import(tree: IntermediateTree) -> NestedFlowImport:
     )
 
 
-def validate_and_repair_graph(graph: SystemFlowGraph) -> tuple[SystemFlowGraph, list[str]]:
+def validate_and_repair_graph(
+    graph: SystemFlowGraph,
+) -> tuple[SystemFlowGraph, list[str]]:
     """
     Validate canonical graph and repair in-place:
     - exactly one logical root (graph.root_node_id)

@@ -14,6 +14,7 @@ dependencies = [
     "numpy==2.2.1",
     "chromadb==0.5.23",
     "neo4j==5.27.0",
+    "motor==3.7.1",
     "pymongo==4.10.1",
     "PyJWT==2.9.0",
     "argon2-cffi==23.1.0",
@@ -27,6 +28,7 @@ dependencies = [
     "orjson==3.10.12",
     "tiktoken==0.8.0",
     "cryptography==44.0.0",
+    "boto3>=1.43.67",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,7 @@ dev = [
     "pytest==8.3.4",
     "pytest-asyncio==0.25.0",
     "pytest-cov==6.0.0",
+    "ruff>=0.12.8",
 ]
 
 [project.scripts]
@@ -53,3 +56,19 @@ package = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["app", "tests"]
+extend-exclude = [".venv", "dist", "build"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]

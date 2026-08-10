@@ -1,4 +1,4 @@
-﻿"""Vector store using Chroma when available, otherwise numpy cosine search."""
+"""Vector store using Chroma when available, otherwise numpy cosine search."""
 
 from __future__ import annotations
 
@@ -61,7 +61,9 @@ class VectorStore:
     def _load_fallback(self) -> None:
         if self._fallback_path.exists():
             try:
-                self._fallback = json.loads(self._fallback_path.read_text(encoding="utf-8"))
+                self._fallback = json.loads(
+                    self._fallback_path.read_text(encoding="utf-8")
+                )
             except Exception:  # noqa: BLE001
                 self._fallback = {"items": []}
 
@@ -112,7 +114,8 @@ class VectorStore:
                 }
                 if chunk.id in existing_ids:
                     self._fallback["items"] = [
-                        item if i["id"] == chunk.id else i for i in self._fallback["items"]
+                        item if i["id"] == chunk.id else i
+                        for i in self._fallback["items"]
                     ]
                 else:
                     self._fallback["items"].append(item)
@@ -160,7 +163,9 @@ class VectorStore:
                 for i, doc in enumerate(docs):
                     dist = dists[i] if i < len(dists) else 1.0
                     meta = metas[i] if i < len(metas) else {}
-                    if (meta or {}).get("project_id") and (meta or {}).get("project_id") != project_id:
+                    if (meta or {}).get("project_id") and (meta or {}).get(
+                        "project_id"
+                    ) != project_id:
                         continue
                     hits.append(
                         {
@@ -171,7 +176,8 @@ class VectorStore:
                             "source_reference": (meta or {}).get("source_reference"),
                             "document_id": (meta or {}).get("document_id"),
                             "project_id": (meta or {}).get("project_id") or project_id,
-                            "source_type": (meta or {}).get("source_type") or "requirement",
+                            "source_type": (meta or {}).get("source_type")
+                            or "requirement",
                         }
                     )
                 return hits
@@ -187,9 +193,15 @@ class VectorStore:
                 continue
             if feature and str(meta.get("feature", "")) != feature:
                 continue
-            if source_type and str(meta.get("source_type", item.get("source_type", ""))) != source_type:
+            if (
+                source_type
+                and str(meta.get("source_type", item.get("source_type", "")))
+                != source_type
+            ):
                 continue
-            score = self.openai.cosine_similarity(query_emb, item.get("embedding") or [])
+            score = self.openai.cosine_similarity(
+                query_emb, item.get("embedding") or []
+            )
             scored.append(
                 (
                     score,
@@ -225,11 +237,17 @@ class VectorStore:
                     except Exception:  # noqa: BLE001
                         pass
             except Exception as exc:  # noqa: BLE001
-                logger.warning("chroma_project_delete_failed", project_id=project_id, error=str(exc))
+                logger.warning(
+                    "chroma_project_delete_failed",
+                    project_id=project_id,
+                    error=str(exc),
+                )
                 try:
                     self._collection.delete(where={"project_id": project_id})
                 except Exception as exc2:  # noqa: BLE001
-                    logger.warning("chroma_project_delete_where_failed", error=str(exc2))
+                    logger.warning(
+                        "chroma_project_delete_where_failed", error=str(exc2)
+                    )
 
         before = len(self._fallback.get("items") or [])
         self._fallback["items"] = [
@@ -261,7 +279,9 @@ class VectorStore:
         before = len(self._fallback.get("items") or [])
         id_set = set(ids)
         self._fallback["items"] = [
-            item for item in (self._fallback.get("items") or []) if item.get("id") not in id_set
+            item
+            for item in (self._fallback.get("items") or [])
+            if item.get("id") not in id_set
         ]
         fallback_removed = before - len(self._fallback["items"])
         if fallback_removed:

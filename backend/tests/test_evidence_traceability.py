@@ -5,14 +5,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.evidence import (
     build_evidence_catalog,
     sanitize_evidence,
 )
 from app.agents.specialists import CriticAgent, TestCaseAgent
 from app.models.schemas import CoverageGapResult, FusedContext
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -48,10 +47,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _fused() -> FusedContext:
@@ -147,9 +144,21 @@ def test_sanitize_drops_fabricated_source_ids():
     fused = _fused()
     catalog = build_evidence_catalog(fused)
     claimed = [
-        {"source_type": "historical_bug", "source_id": "BUG-007", "source_title": "real"},
-        {"source_type": "historical_bug", "source_id": "BUG-FAKE-999", "source_title": "invented"},
-        {"source_type": "requirement", "source_id": "chunk_req_1", "source_title": "auth"},
+        {
+            "source_type": "historical_bug",
+            "source_id": "BUG-007",
+            "source_title": "real",
+        },
+        {
+            "source_type": "historical_bug",
+            "source_id": "BUG-FAKE-999",
+            "source_title": "invented",
+        },
+        {
+            "source_type": "requirement",
+            "source_id": "chunk_req_1",
+            "source_title": "auth",
+        },
     ]
     cleaned = sanitize_evidence(claimed, catalog)
     cleaned_ids = {e.source_id for e in cleaned}
@@ -232,12 +241,19 @@ def test_critic_traceability():
         critical_gaps=["Uncovered branch: Enterprise SSO"],
         recommended_tests=["Add path coverage for Enterprise SSO"],
     )
-    notes, improved = CriticAgent().review(test_cases=base, coverage=coverage, fused=fused)
+    notes, improved = CriticAgent().review(
+        test_cases=base, coverage=coverage, fused=fused
+    )
     critic_cases = [c for c in improved if c.generation_method == "critic"]
     assert critic_cases
-    assert any("Enterprise SSO" in ((c.title or "") + (c.reasoning or "")) for c in critic_cases)
+    assert any(
+        "Enterprise SSO" in ((c.title or "") + (c.reasoning or ""))
+        for c in critic_cases
+    )
     assert all(c.evidence for c in critic_cases)
-    assert any(e.source_type == "coverage_gap" for c in critic_cases for e in c.evidence)
+    assert any(
+        e.source_type == "coverage_gap" for c in critic_cases for e in c.evidence
+    )
     assert notes
 
 
@@ -266,7 +282,9 @@ def test_llm_context_includes_allowed_evidence_catalog():
     ctx = TestCaseAgent().build_llm_context("Generate tests", fused)
     assert "allowed_evidence_catalog" in ctx
     catalog_ids = {
-        e.get("source_id") for e in ctx["allowed_evidence_catalog"] if e.get("source_id")
+        e.get("source_id")
+        for e in ctx["allowed_evidence_catalog"]
+        if e.get("source_id")
     }
     assert "BUG-007" in catalog_ids
     assert "chunk_req_1" in catalog_ids

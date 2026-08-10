@@ -5,20 +5,20 @@ from __future__ import annotations
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.graph.nl.builder import tree_to_nested_import, validate_and_repair_graph
-from app.graph.nl.classifier import NodeClassifier, clear_classification_cache, parse_classification_table
+from app.graph.nl.classifier import (
+    NodeClassifier,
+    clear_classification_cache,
+    parse_classification_table,
+)
+from app.graph.nl.parser import parse_to_tree
 from app.graph.nl.pipeline import NLGraphPipeline
 from app.graph.nl.preprocessor import normalize_text
-from app.graph.nl.parser import parse_to_tree
 from app.models.enums import NodeType
 from app.models.schemas import GraphNode, SystemFlowGraph
+from fastapi.testclient import TestClient
 
-
-SIMPLE_NL = (
-    "Checkout supports guest checkout, registered user, payment, and address validation."
-)
+SIMPLE_NL = "Checkout supports guest checkout, registered user, payment, and address validation."
 
 BULLET_NL = """
 Checkout is the root feature
@@ -74,10 +74,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def test_preprocessor_normalizes_bullets_and_spaces():
@@ -139,7 +137,9 @@ def test_pipeline_deterministic_hierarchy():
     a = pipe.run(SIMPLE_NL, project_id="p1")
     b = pipe.run(SIMPLE_NL, project_id="p1")
     assert a.nested.root == b.nested.root
-    assert [br.name for br in a.nested.branches] == [br.name for br in b.nested.branches]
+    assert [br.name for br in a.nested.branches] == [
+        br.name for br in b.nested.branches
+    ]
     assert a.stats["llm_calls"] == b.stats["llm_calls"]
 
 
@@ -154,7 +154,9 @@ def test_pipeline_never_returns_llm_json_shape_directly():
 
 def test_validate_and_repair_attaches_orphans():
     root = GraphNode(id="feature_a", type=NodeType.FEATURE, name="Root", project_id="p")
-    orphan = GraphNode(id="node_b", type=NodeType.SUB_FEATURE, name="Orphan", project_id="p")
+    orphan = GraphNode(
+        id="node_b", type=NodeType.SUB_FEATURE, name="Orphan", project_id="p"
+    )
     graph = SystemFlowGraph(
         project_id="p",
         root_node_id="feature_a",
@@ -168,7 +170,9 @@ def test_validate_and_repair_attaches_orphans():
 
 def test_api_nl_to_graph_uses_new_pipeline(client):
     clear_classification_cache()
-    proj = client.post("/api/projects", json={"name": "NL Pipe", "root_feature": "Checkout"}).json()
+    proj = client.post(
+        "/api/projects", json={"name": "NL Pipe", "root_feature": "Checkout"}
+    ).json()
     graph = client.post(
         f"/api/projects/{proj['id']}/flow/from-text",
         json={"text": SIMPLE_NL},
@@ -185,7 +189,9 @@ def test_api_nl_to_graph_uses_new_pipeline(client):
 
 
 def test_json_import_unchanged(client):
-    proj = client.post("/api/projects", json={"name": "JSON", "root_feature": "X"}).json()
+    proj = client.post(
+        "/api/projects", json={"name": "JSON", "root_feature": "X"}
+    ).json()
     payload = {
         "root": "Checkout",
         "description": "typed import",

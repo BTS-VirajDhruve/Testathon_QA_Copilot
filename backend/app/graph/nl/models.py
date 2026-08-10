@@ -38,8 +38,10 @@ class IntermediateNode:
         for node in self.walk():
             n = node.name.strip().lower()
             shorter, longer = (target, n) if len(target) <= len(n) else (n, target)
-            if len(shorter) >= 4 and longer.startswith(shorter) and (
-                len(longer) == len(shorter) or longer[len(shorter)] in " \t+-/(:|"
+            if (
+                len(shorter) >= 4
+                and longer.startswith(shorter)
+                and (len(longer) == len(shorter) or longer[len(shorter)] in " \t+-/(:|")
             ):
                 return node
         return None

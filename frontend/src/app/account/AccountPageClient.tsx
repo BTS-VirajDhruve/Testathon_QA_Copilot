@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { buildLoginHref } from "@/lib/auth-routing";
 import { resolveAccountErrorMessage, validateAccountProfileInput } from "@/lib/auth-account";
+import { AuthSessionShimmer } from "@/components/AuthSessionShimmer";
 
 export function AccountPageClient() {
   const router = useRouter();
@@ -26,7 +27,7 @@ export function AccountPageClient() {
   }, [session.user]);
 
   useEffect(() => {
-    if (authStatus === "authenticated") return;
+    if (authStatus !== "unauthenticated") return;
     if (typeof window === "undefined") return;
     router.replace(buildLoginHref(pathname, window.location.search));
   }, [authStatus, pathname, router]);
@@ -61,6 +62,10 @@ export function AccountPageClient() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (authStatus === "loading") {
+    return <AuthSessionShimmer />;
   }
 
   if (authStatus !== "authenticated") {

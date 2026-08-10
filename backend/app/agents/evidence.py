@@ -59,16 +59,17 @@ def build_evidence_catalog(fused: FusedContext) -> list[EvidenceReference]:
 
     for hit in fused.semantic_context:
         meta = hit.get("metadata") or {}
-        source_type = (
-            hit.get("source_type")
-            or meta.get("source_type")
-            or "requirement"
-        )
-        if source_type in {"jira_issue", "confluence_page"} or meta.get("provider") == "atlassian":
+        source_type = hit.get("source_type") or meta.get("source_type") or "requirement"
+        if (
+            source_type in {"jira_issue", "confluence_page"}
+            or meta.get("provider") == "atlassian"
+        ):
             source_type = meta.get("source_type") or source_type
             catalog.append(
                 EvidenceReference(
-                    source_type=source_type if source_type in {"jira_issue", "confluence_page"} else "requirement",
+                    source_type=source_type
+                    if source_type in {"jira_issue", "confluence_page"}
+                    else "requirement",
                     source_id=hit.get("id")
                     or meta.get("external_id")
                     or meta.get("document_id"),
@@ -131,11 +132,7 @@ def sanitize_evidence(
     catalog: list[EvidenceReference],
 ) -> list[EvidenceReference]:
     """Keep only evidence that matches real catalog identities. Never invent IDs."""
-    allowed_ids = {
-        (e.source_type, e.source_id)
-        for e in catalog
-        if e.source_id
-    }
+    allowed_ids = {(e.source_type, e.source_id) for e in catalog if e.source_id}
     allowed_titles = {
         (e.source_type, (e.source_title or "").strip().lower())
         for e in catalog
@@ -182,7 +179,8 @@ def sanitize_evidence(
                     e
                     for e in catalog
                     if e.source_type == item.source_type
-                    and (e.source_title or "").strip().lower() == (item.source_title or "").strip().lower()
+                    and (e.source_title or "").strip().lower()
+                    == (item.source_title or "").strip().lower()
                 ),
                 None,
             )
@@ -271,7 +269,10 @@ def evidence_for_path_bugs_and_requirements(
     for tc in fused.existing_coverage:
         title = (tc.get("title") or "").lower()
         gp = " ".join(str(x) for x in (tc.get("graph_path") or [])).lower()
-        if path_l and (path_l in gp or any(p.lower() in title or p.lower() in gp for p in path_labels)):
+        if path_l and (
+            path_l in gp
+            or any(p.lower() in title or p.lower() in gp for p in path_labels)
+        ):
             out.append(
                 EvidenceReference(
                     source_type="existing_test",

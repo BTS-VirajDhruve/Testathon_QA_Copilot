@@ -18,14 +18,12 @@ from app.models.enums import (
     DuplicateRelation,
     LLMTaskType,
     Priority,
-    TestReviewStatus,
     TestValidity,
 )
 from app.models.schemas import (
     AutomationCapabilityProfile,
     AutomationFeasibilityReview,
     AutomationSummary,
-    EvidenceReference,
     FusedContext,
     ReviewedTestCase,
     TestCase,
@@ -75,7 +73,9 @@ _SECURITY = re.compile(
 )
 _A11Y = re.compile(r"\b(accessib|aria|screen\s*reader|wcag|keyboard\s+nav)\b", re.I)
 _PERF = re.compile(r"\b(performance|latency|load\s+test|throughput|sla)\b", re.I)
-_DB = re.compile(r"\b(database|persist(?:ed|ence)?|sql\b|transaction|db\s+row|schema)\b", re.I)
+_DB = re.compile(
+    r"\b(database|persist(?:ed|ence)?|sql\b|transaction|db\s+row|schema)\b", re.I
+)
 _OBSERVABLE = re.compile(
     r"\b(status|code|error|message|redirect|saved|created|deleted|"
     r"displayed|returned|persisted|assert|equals|contains|visible|"
@@ -94,7 +94,9 @@ def _content_hash(tc: TestCase) -> str:
     payload = {
         "title": tc.title,
         "category": tc.category,
-        "priority": str(tc.priority.value if hasattr(tc.priority, "value") else tc.priority),
+        "priority": str(
+            tc.priority.value if hasattr(tc.priority, "value") else tc.priority
+        ),
         "risk": str(tc.risk.value if hasattr(tc.risk, "value") else tc.risk),
         "preconditions": tc.preconditions,
         "steps": tc.steps,
@@ -107,8 +109,14 @@ def _content_hash(tc: TestCase) -> str:
 
 
 def _needs_setup(tc: TestCase) -> bool:
-    blob = " ".join([tc.title or "", tc.expected_result or "", " ".join(tc.steps or [])]).lower()
-    return bool(re.search(r"\b(login|auth|account|seed|fixture|cart|payment|session|sandbox)\b", blob))
+    blob = " ".join(
+        [tc.title or "", tc.expected_result or "", " ".join(tc.steps or [])]
+    ).lower()
+    return bool(
+        re.search(
+            r"\b(login|auth|account|seed|fixture|cart|payment|session|sandbox)\b", blob
+        )
+    )
 
 
 def has_observable_outcome(text: str | None) -> bool:
@@ -119,8 +127,12 @@ def has_observable_outcome(text: str | None) -> bool:
     return bool(_OBSERVABLE.search(blob) or _API_HINT.search(blob))
 
 
-def default_observable_expected(title: str | None = None, path: list[str] | None = None) -> str:
-    label = (title or "").strip() or (" → ".join(path or []) if path else "the scenario")
+def default_observable_expected(
+    title: str | None = None, path: list[str] | None = None
+) -> str:
+    label = (title or "").strip() or (
+        " → ".join(path or []) if path else "the scenario"
+    )
     return (
         f"The system completes '{label}' and returns a clear status or error message "
         f"that can be asserted (success path shows confirmation; failure path shows validation error)."
@@ -161,14 +173,31 @@ def apply_safe_corrections(tc: TestCase) -> tuple[TestCase, list[str]]:
             corrected.expected_result = er
             applied.append("normalized_expected_result")
 
-    pri = str(corrected.priority.value if hasattr(corrected.priority, "value") else corrected.priority).lower()
-    pri_map = {"p0": "critical", "p1": "high", "p2": "medium", "p3": "low", "crit": "critical", "med": "medium"}
+    pri = str(
+        corrected.priority.value
+        if hasattr(corrected.priority, "value")
+        else corrected.priority
+    ).lower()
+    pri_map = {
+        "p0": "critical",
+        "p1": "high",
+        "p2": "medium",
+        "p3": "low",
+        "crit": "critical",
+        "med": "medium",
+    }
     if pri in pri_map:
         corrected.priority = Priority(pri_map[pri])
         applied.append("standardized_priority")
 
     cat = (corrected.category or "").strip().lower()
-    cat_map = {"func": "functional", "neg": "negative", "reg": "regression", "explore": "exploratory", "sec": "security"}
+    cat_map = {
+        "func": "functional",
+        "neg": "negative",
+        "reg": "regression",
+        "explore": "exploratory",
+        "sec": "security",
+    }
     if cat in cat_map:
         corrected.category = cat_map[cat]
         applied.append("standardized_test_type")
@@ -204,14 +233,17 @@ def apply_validity_hardening(tc: TestCase) -> tuple[TestCase, list[str]]:
                 f"is displayed or returned."
             )
         else:
-            corrected.expected_result = default_observable_expected(corrected.title, path)
+            corrected.expected_result = default_observable_expected(
+                corrected.title, path
+            )
         applied.append("hardened_expected_result_observability")
 
     steps = [s for s in (corrected.steps or []) if str(s).strip()]
     vague_steps = [
         s
         for s in steps
-        if len(str(s).strip()) < 8 or re.match(r"^(try|do|check|test)\b", str(s).strip(), re.I)
+        if len(str(s).strip()) < 8
+        or re.match(r"^(try|do|check|test)\b", str(s).strip(), re.I)
     ]
     if not steps or len(vague_steps) >= max(1, (len(steps) + 1) // 2):
         corrected.steps = [
@@ -282,13 +314,22 @@ def deterministic_validity_findings(
         issues.append("missing_steps")
         missing.append("execution steps")
     else:
-        vague_steps = [s for s in steps if len(str(s).strip()) < 8 or re.match(r"^(try|do|check|test)\b", str(s).strip(), re.I)]
+        vague_steps = [
+            s
+            for s in steps
+            if len(str(s).strip()) < 8
+            or re.match(r"^(try|do|check|test)\b", str(s).strip(), re.I)
+        ]
         if len(vague_steps) >= max(1, (len(steps) + 1) // 2):
             issues.append("vague_or_non_reproducible_steps")
-            reasons.append("Steps are too vague for another QA engineer to reproduce reliably.")
+            reasons.append(
+                "Steps are too vague for another QA engineer to reproduce reliably."
+            )
         if len(steps) >= 10:
             issues.append("excessive_breadth")
-            reasons.append("The test combines too many actions for one focused scenario.")
+            reasons.append(
+                "The test combines too many actions for one focused scenario."
+            )
 
     expected = (tc.expected_result or "").strip()
     if not expected:
@@ -296,10 +337,14 @@ def deterministic_validity_findings(
         missing.append("observable expected result")
     elif _VAGUE_EXPECTED.match(expected) or len(expected) < 8:
         issues.append("non_observable_expected_result")
-        reasons.append("Expected result is too vague to determine pass/fail objectively.")
+        reasons.append(
+            "Expected result is too vague to determine pass/fail objectively."
+        )
     elif not _OBSERVABLE.search(expected) and not _API_HINT.search(expected):
         issues.append("expected_result_may_not_be_observable")
-        reasons.append("Expected result may require clearer observable outcome or assertion.")
+        reasons.append(
+            "Expected result may require clearer observable outcome or assertion."
+        )
 
     if not tc.preconditions and _needs_setup(tc):
         issues.append("missing_preconditions")
@@ -308,13 +353,21 @@ def deterministic_validity_findings(
     graph_path_valid = None
     if tc.graph_path:
         graph_path_valid = True
-        unknown = [n for n in tc.graph_path if normalize_text(n) and normalize_text(n) not in valid_node_names]
+        unknown = [
+            n
+            for n in tc.graph_path
+            if normalize_text(n) and normalize_text(n) not in valid_node_names
+        ]
         if unknown:
             graph_path_valid = False
             issues.append(f"invalid_graph_path_refs:{','.join(unknown[:3])}")
-            reasons.append("Graph path references nodes not found in the active project flow.")
+            reasons.append(
+                "Graph path references nodes not found in the active project flow."
+            )
 
-    supported_by_project = (tc.project_id in {None, project_id}) and (tc.feature_id is None or tc.feature_id != "")
+    supported_by_project = (tc.project_id in {None, project_id}) and (
+        tc.feature_id is None or tc.feature_id != ""
+    )
     if tc.project_id and tc.project_id != project_id:
         supported_by_project = False
         issues.append("cross_project_test")
@@ -326,7 +379,9 @@ def deterministic_validity_findings(
         sid = (ev.source_id or "").strip()
         if sid and sid not in evidence_ids:
             issues.append(f"unsupported_evidence_id:{sid}")
-            reasons.append("At least one evidence reference does not resolve in persisted project data.")
+            reasons.append(
+                "At least one evidence reference does not resolve in persisted project data."
+            )
         if sid and project_evidence_ids and sid not in project_evidence_ids:
             issues.append(f"cross_project_evidence:{sid}")
             reasons.append("Evidence reference does not belong to the active project.")
@@ -343,21 +398,35 @@ def deterministic_validity_findings(
         if rel == DuplicateRelation.EXACT_DUPLICATE:
             duplicate_status = rel.value
             issues.append(f"exact_duplicate:{other.test_case_id}")
-            reasons.append("This test is an exact duplicate of another scenario in the same suite.")
+            reasons.append(
+                "This test is an exact duplicate of another scenario in the same suite."
+            )
             break
-        if rel == DuplicateRelation.NEAR_DUPLICATE and duplicate_status == DuplicateRelation.DISTINCT.value:
+        if (
+            rel == DuplicateRelation.NEAR_DUPLICATE
+            and duplicate_status == DuplicateRelation.DISTINCT.value
+        ):
             duplicate_status = rel.value
-        elif rel == DuplicateRelation.COMPLEMENTARY and duplicate_status == DuplicateRelation.DISTINCT.value:
+        elif (
+            rel == DuplicateRelation.COMPLEMENTARY
+            and duplicate_status == DuplicateRelation.DISTINCT.value
+        ):
             duplicate_status = rel.value
 
     contradiction = False
-    if re.search(r"\b(should succeed|is created|save succeeds)\b", expected, re.I) and re.search(r"\b(blocked|fails|error|rejected|prevented)\b", " ".join(steps), re.I):
+    if re.search(
+        r"\b(should succeed|is created|save succeeds)\b", expected, re.I
+    ) and re.search(
+        r"\b(blocked|fails|error|rejected|prevented)\b", " ".join(steps), re.I
+    ):
         contradiction = True
         issues.append("contradictory_expected_behavior")
         reasons.append("Steps and expected outcome appear to contradict each other.")
 
     if _SUBJECTIVE.search(title) and not evidence_supported:
-        reasons.append("No evidence defines an objective rule for the subjective behavior being tested.")
+        reasons.append(
+            "No evidence defines an objective rule for the subjective behavior being tested."
+        )
 
     correction_possible = any(
         x in issues
@@ -384,18 +453,33 @@ def deterministic_validity_findings(
 
 def semantic_correction_suggestions(issues: list[str]) -> list[str]:
     suggestions: list[str] = []
-    if "missing_expected_result" in issues or "non_observable_expected_result" in issues:
-        suggestions.append("Add a machine-observable expected result (status, message, persistence, or UI state).")
+    if (
+        "missing_expected_result" in issues
+        or "non_observable_expected_result" in issues
+    ):
+        suggestions.append(
+            "Add a machine-observable expected result (status, message, persistence, or UI state)."
+        )
     if "missing_steps" in issues or "vague_or_non_reproducible_steps" in issues:
-        suggestions.append("Replace vague steps with ordered, single-action, reproducible instructions.")
+        suggestions.append(
+            "Replace vague steps with ordered, single-action, reproducible instructions."
+        )
     if "vague_title" in issues or "missing_title" in issues:
-        suggestions.append("Use a specific title that states the condition and expected outcome.")
+        suggestions.append(
+            "Use a specific title that states the condition and expected outcome."
+        )
     if "missing_preconditions" in issues:
-        suggestions.append("Document required accounts, seed data, and environment preconditions.")
+        suggestions.append(
+            "Document required accounts, seed data, and environment preconditions."
+        )
     if any(i.startswith("invalid_graph_path") for i in issues):
-        suggestions.append("Align graph_path with nodes that exist in the system flow graph.")
+        suggestions.append(
+            "Align graph_path with nodes that exist in the system flow graph."
+        )
     if "insufficient_evidence" in issues:
-        suggestions.append("Link the test to a requirement, graph path, bug, or approved user instruction.")
+        suggestions.append(
+            "Link the test to a requirement, graph path, bug, or approved user instruction."
+        )
     return suggestions
 
 
@@ -423,41 +507,90 @@ def validity_score(issues: list[str]) -> int:
     return max(0, min(100, score))
 
 
-def decide_validity(tc: TestCase, findings: dict[str, Any]) -> tuple[TestValidity, list[str]]:
+def decide_validity(
+    tc: TestCase, findings: dict[str, Any]
+) -> tuple[TestValidity, list[str]]:
     issues = findings["issues"]
     reasons = list(findings["reasons"])
     if not findings["supported_by_project"]:
-        return TestValidity.INVALID, reasons or ["Test does not belong to the active project."]
+        return TestValidity.INVALID, reasons or [
+            "Test does not belong to the active project."
+        ]
     if any(i.startswith("cross_project_evidence") for i in issues):
-        return TestValidity.INVALID, reasons or ["Evidence from another project cannot support this test."]
+        return TestValidity.INVALID, reasons or [
+            "Evidence from another project cannot support this test."
+        ]
     if any(i.startswith("invalid_graph_path_refs") for i in issues):
-        return TestValidity.INVALID, reasons or ["Graph path does not exist in the active project."]
-    if any(i.startswith("unsupported_evidence_id") for i in issues) and not (tc.graph_path or tc.source_references):
-        return TestValidity.INSUFFICIENT_EVIDENCE, reasons or ["Expected behavior is not supported by available evidence."]
+        return TestValidity.INVALID, reasons or [
+            "Graph path does not exist in the active project."
+        ]
+    if any(i.startswith("unsupported_evidence_id") for i in issues) and not (
+        tc.graph_path or tc.source_references
+    ):
+        return TestValidity.INSUFFICIENT_EVIDENCE, reasons or [
+            "Expected behavior is not supported by available evidence."
+        ]
     if any(i.startswith("exact_duplicate") for i in issues):
-        return TestValidity.INVALID, reasons or ["Test is an exact duplicate and adds no new value."]
+        return TestValidity.INVALID, reasons or [
+            "Test is an exact duplicate and adds no new value."
+        ]
     if findings["contradiction"]:
-        return TestValidity.INVALID, reasons or ["Expected behavior contradicts the scenario steps."]
+        return TestValidity.INVALID, reasons or [
+            "Expected behavior contradicts the scenario steps."
+        ]
     if "missing_steps" in issues or "missing_expected_result" in issues:
-        return TestValidity.INVALID, reasons or ["Test lacks executable steps or observable expected result."]
-    if _SUBJECTIVE.search(tc.expected_result or "") and not findings["evidence_supported"]:
-        return TestValidity.INSUFFICIENT_EVIDENCE, reasons or ["Subjective expectation is unsupported by defined product rules."]
+        return TestValidity.INVALID, reasons or [
+            "Test lacks executable steps or observable expected result."
+        ]
+    if (
+        _SUBJECTIVE.search(tc.expected_result or "")
+        and not findings["evidence_supported"]
+    ):
+        return TestValidity.INSUFFICIENT_EVIDENCE, reasons or [
+            "Subjective expectation is unsupported by defined product rules."
+        ]
     if not findings["evidence_supported"] and not tc.graph_path:
-        return TestValidity.INSUFFICIENT_EVIDENCE, reasons or ["Available project evidence does not establish this expected behavior."]
-    if any(i in issues for i in ("vague_title", "vague_or_non_reproducible_steps", "missing_preconditions", "expected_result_may_not_be_observable")):
-        return TestValidity.NEEDS_REVISION, reasons or ["The scenario is supported but needs clearer execution details."]
-    return TestValidity.VALID, reasons or ["Scenario is supported, executable, and has an observable outcome."]
+        return TestValidity.INSUFFICIENT_EVIDENCE, reasons or [
+            "Available project evidence does not establish this expected behavior."
+        ]
+    if any(
+        i in issues
+        for i in (
+            "vague_title",
+            "vague_or_non_reproducible_steps",
+            "missing_preconditions",
+            "expected_result_may_not_be_observable",
+        )
+    ):
+        return TestValidity.NEEDS_REVISION, reasons or [
+            "The scenario is supported but needs clearer execution details."
+        ]
+    return TestValidity.VALID, reasons or [
+        "Scenario is supported, executable, and has an observable outcome."
+    ]
 
 
-def compute_automation_signals(tc: TestCase, *, profile: AutomationCapabilityProfile | None = None) -> dict[str, Any]:
+def compute_automation_signals(
+    tc: TestCase, *, profile: AutomationCapabilityProfile | None = None
+) -> dict[str, Any]:
     score = 50
     positives: list[str] = []
     negatives: list[str] = []
-    blob = " ".join([tc.title or "", tc.expected_result or "", " ".join(tc.steps or []), tc.category or "", tc.testing_technique or ""])
+    blob = " ".join(
+        [
+            tc.title or "",
+            tc.expected_result or "",
+            " ".join(tc.steps or []),
+            tc.category or "",
+            tc.testing_technique or "",
+        ]
+    )
     if tc.steps:
         score += 12
         positives.append("repeatable_steps")
-    if _OBSERVABLE.search(tc.expected_result or "") or _API_HINT.search(tc.expected_result or ""):
+    if _OBSERVABLE.search(tc.expected_result or "") or _API_HINT.search(
+        tc.expected_result or ""
+    ):
         score += 14
         positives.append("deterministic_machine_observable_result")
     else:
@@ -469,7 +602,9 @@ def compute_automation_signals(tc: TestCase, *, profile: AutomationCapabilityPro
     elif _needs_setup(tc):
         score -= 6
         negatives.append("manual_setup_or_cleanup_needed")
-    pri = str(tc.priority.value if hasattr(tc.priority, "value") else tc.priority).lower()
+    pri = str(
+        tc.priority.value if hasattr(tc.priority, "value") else tc.priority
+    ).lower()
     risk = str(tc.risk.value if hasattr(tc.risk, "value") else tc.risk).lower()
     if pri in {"critical", "high"} or risk in {"critical", "high"}:
         score += 10
@@ -483,7 +618,11 @@ def compute_automation_signals(tc: TestCase, *, profile: AutomationCapabilityPro
     if _INTEGRATION.search(blob):
         score -= 4
         negatives.append("external_or_async_dependency")
-        if profile and (profile.mock_services_available or profile.sandbox_integrations_available or profile.service_virtualization_available):
+        if profile and (
+            profile.mock_services_available
+            or profile.sandbox_integrations_available
+            or profile.service_virtualization_available
+        ):
             score += 8
             positives.append("controllable_dependency_via_profile")
     if _UI_HINT.search(blob) and not (profile and profile.stable_test_ids_available):
@@ -511,14 +650,25 @@ def compute_automation_signals(tc: TestCase, *, profile: AutomationCapabilityPro
     }
 
 
-def recommend_automation_layer(tc: TestCase, *, profile: AutomationCapabilityProfile | None = None) -> tuple[AutomationLayer, list[str]]:
-    blob = " ".join([tc.title or "", tc.expected_result or "", " ".join(tc.steps or []), tc.category or ""])
+def recommend_automation_layer(
+    tc: TestCase, *, profile: AutomationCapabilityProfile | None = None
+) -> tuple[AutomationLayer, list[str]]:
+    blob = " ".join(
+        [
+            tc.title or "",
+            tc.expected_result or "",
+            " ".join(tc.steps or []),
+            tc.category or "",
+        ]
+    )
     reasons: list[str] = []
     if _PERF.search(blob):
         reasons.append("performance behavior ? performance tooling")
         return AutomationLayer.PERFORMANCE, reasons
     if _A11Y.search(blob):
-        reasons.append("accessibility rules ? accessibility scanner (+ manual where needed)")
+        reasons.append(
+            "accessibility rules ? accessibility scanner (+ manual where needed)"
+        )
         return AutomationLayer.ACCESSIBILITY, reasons
     if re.search(r"\b(contract|schema|openapi)\b", blob, re.I):
         reasons.append("API response contract ? contract/API")
@@ -527,7 +677,9 @@ def recommend_automation_layer(tc: TestCase, *, profile: AutomationCapabilityPro
         reasons.append("API/business rule validation ? API")
         return AutomationLayer.API, reasons
     if _VISUAL.search(blob) and not _API_HINT.search(blob):
-        reasons.append("visual consistency ? visual regression (+ manual if subjective)")
+        reasons.append(
+            "visual consistency ? visual regression (+ manual if subjective)"
+        )
         return AutomationLayer.VISUAL, reasons
     if _SECURITY.search(blob) and not _UI_HINT.search(blob):
         reasons.append("security/auth rule ? security or API checks")
@@ -538,7 +690,9 @@ def recommend_automation_layer(tc: TestCase, *, profile: AutomationCapabilityPro
     if _INTEGRATION.search(blob):
         reasons.append("cross-service / external workflow ? integration")
         return AutomationLayer.INTEGRATION, reasons
-    if re.search(r"\b(business\s+rule|component|unit)\b", blob, re.I) and not _UI_HINT.search(blob):
+    if re.search(
+        r"\b(business\s+rule|component|unit)\b", blob, re.I
+    ) and not _UI_HINT.search(blob):
         reasons.append("business rule without UI journey ? component/API")
         return AutomationLayer.COMPONENT, reasons
     if _UI_HINT.search(blob) or (tc.category or "").lower() in {"functional", "ui"}:
@@ -555,7 +709,16 @@ def classify_automation(
     tc: TestCase,
     *,
     profile: AutomationCapabilityProfile | None = None,
-) -> tuple[AutomationSuitability, AutomationPriority, AutomationEffort, ConfidenceLevel, list[str], list[str], list[str], list[str]]:
+) -> tuple[
+    AutomationSuitability,
+    AutomationPriority,
+    AutomationEffort,
+    ConfidenceLevel,
+    list[str],
+    list[str],
+    list[str],
+    list[str],
+]:
     signals = compute_automation_signals(tc, profile=profile)
     layer, layer_reasons = recommend_automation_layer(tc, profile=profile)
     score = int(signals["score"])
@@ -564,22 +727,39 @@ def classify_automation(
     blockers: list[str] = []
     prereqs: list[str] = []
     human = bool(signals["human_judgment_required"])
-    blob = " ".join([tc.title or "", tc.expected_result or "", " ".join(tc.steps or [])])
+    blob = " ".join(
+        [tc.title or "", tc.expected_result or "", " ".join(tc.steps or [])]
+    )
 
     if human and _VISUAL.search(blob):
         suit = AutomationSuitability.HYBRID
-        reasons.append("Automated setup or assertions are useful, but visual judgment remains manual.")
-        prereqs.append("Define objective assertions separately from human review criteria")
+        reasons.append(
+            "Automated setup or assertions are useful, but visual judgment remains manual."
+        )
+        prereqs.append(
+            "Define objective assertions separately from human review criteria"
+        )
     elif human and not _OBSERVABLE.search(tc.expected_result or ""):
         suit = AutomationSuitability.MANUAL
-        reasons.append("Human observation or judgment is the central purpose of this test.")
+        reasons.append(
+            "Human observation or judgment is the central purpose of this test."
+        )
     else:
         needs_conditions = False
-        if signals["stable_selectors_required"] and not (profile and profile.stable_test_ids_available):
+        if signals["stable_selectors_required"] and not (
+            profile and profile.stable_test_ids_available
+        ):
             needs_conditions = True
             blockers.append("Stable UI selectors are not confirmed")
             prereqs.append("stable selectors or test IDs")
-        if _INTEGRATION.search(blob) and not (profile and (profile.mock_services_available or profile.sandbox_integrations_available or profile.service_virtualization_available)):
+        if _INTEGRATION.search(blob) and not (
+            profile
+            and (
+                profile.mock_services_available
+                or profile.sandbox_integrations_available
+                or profile.service_virtualization_available
+            )
+        ):
             needs_conditions = True
             blockers.append("External dependency control is not configured")
             prereqs.append("mock service, sandbox provider, or service virtualization")
@@ -598,15 +778,21 @@ def classify_automation(
             reasons.append(f"automation_score={score} with known prerequisites")
         elif score >= 40:
             suit = AutomationSuitability.NOT_READY_FOR_AUTOMATION
-            reasons.append(f"automation_score={score} valid test but environment remains underdefined")
+            reasons.append(
+                f"automation_score={score} valid test but environment remains underdefined"
+            )
         else:
             suit = AutomationSuitability.MANUAL
-            reasons.append(f"automation_score={score} suggests low reliable automation value")
+            reasons.append(
+                f"automation_score={score} suggests low reliable automation value"
+            )
 
     if suit == AutomationSuitability.MANUAL:
         auto_pri = AutomationPriority.NOT_RECOMMENDED
     else:
-        pri = str(tc.priority.value if hasattr(tc.priority, "value") else tc.priority).lower()
+        pri = str(
+            tc.priority.value if hasattr(tc.priority, "value") else tc.priority
+        ).lower()
         if pri == "critical":
             auto_pri = AutomationPriority.CRITICAL
         elif pri == "high":
@@ -623,8 +809,15 @@ def classify_automation(
     else:
         effort = AutomationEffort.MEDIUM
 
-    confidence = ConfidenceLevel.HIGH if profile and suit == AutomationSuitability.AUTOMATE else ConfidenceLevel.MEDIUM
-    if not profile or suit in {AutomationSuitability.MANUAL, AutomationSuitability.NOT_READY_FOR_AUTOMATION}:
+    confidence = (
+        ConfidenceLevel.HIGH
+        if profile and suit == AutomationSuitability.AUTOMATE
+        else ConfidenceLevel.MEDIUM
+    )
+    if not profile or suit in {
+        AutomationSuitability.MANUAL,
+        AutomationSuitability.NOT_READY_FOR_AUTOMATION,
+    }:
         confidence = ConfidenceLevel.MEDIUM
     if not profile and suit != AutomationSuitability.MANUAL:
         confidence = ConfidenceLevel.LOW
@@ -669,7 +862,10 @@ def build_automation_summary(items: list[ReviewedTestCase]) -> AutomationSummary
             summary.not_ready_for_automation += 1
         elif suit == AutomationSuitability.NOT_EVALUATED.value:
             summary.not_evaluated += 1
-        if review.automation_priority in {AutomationPriority.CRITICAL.value, AutomationPriority.HIGH.value}:
+        if review.automation_priority in {
+            AutomationPriority.CRITICAL.value,
+            AutomationPriority.HIGH.value,
+        }:
             summary.high_priority_automation += 1
         if review.estimated_effort == AutomationEffort.LOW.value:
             summary.effort_low += 1
@@ -680,7 +876,9 @@ def build_automation_summary(items: list[ReviewedTestCase]) -> AutomationSummary
     return summary
 
 
-def apply_human_override(item: ReviewedTestCase, override: dict[str, Any] | None) -> ReviewedTestCase:
+def apply_human_override(
+    item: ReviewedTestCase, override: dict[str, Any] | None
+) -> ReviewedTestCase:
     if not override:
         return item
     out = item.model_copy(deep=True)
@@ -692,11 +890,15 @@ def apply_human_override(item: ReviewedTestCase, override: dict[str, Any] | None
         out.final_review_status = str(override["validity"])
     if out.automation_review is not None:
         if override.get("automation_suitability"):
-            out.automation_review.automation_suitability = str(override["automation_suitability"])
+            out.automation_review.automation_suitability = str(
+                override["automation_suitability"]
+            )
         if override.get("automation_layer"):
             out.automation_review.recommended_layer = str(override["automation_layer"])
         if override.get("automation_priority"):
-            out.automation_review.automation_priority = str(override["automation_priority"])
+            out.automation_review.automation_priority = str(
+                override["automation_priority"]
+            )
         if override.get("automation_effort"):
             out.automation_review.estimated_effort = str(override["automation_effort"])
     return out
@@ -728,7 +930,9 @@ class TestReviewAutomationAgent:
         automation_strategy: str | None = None,
         routing_context: ModelRoutingContext | None = None,
         force_deterministic: bool = False,
-    ) -> tuple[list[ReviewedTestCase], ValiditySummary, AutomationSummary, dict[str, Any]]:
+    ) -> tuple[
+        list[ReviewedTestCase], ValiditySummary, AutomationSummary, dict[str, Any]
+    ]:
         fused = fused or FusedContext()
         targeted_ids = targeted_ids or set()
         existing_ids = existing_ids or set()
@@ -769,7 +973,9 @@ class TestReviewAutomationAgent:
                     evidence_ids.add(ev.source_id)
                     project_evidence_ids.add(ev.source_id)
 
-        scoped = [tc for tc in test_cases if not tc.project_id or tc.project_id == project_id]
+        scoped = [
+            tc for tc in test_cases if not tc.project_id or tc.project_id == project_id
+        ]
         seen_ids: set[str] = set()
         reviewed: list[ReviewedTestCase] = []
         for tc in scoped:
@@ -794,7 +1000,9 @@ class TestReviewAutomationAgent:
                 quality_issues=findings["issues"],
                 evidence_checked=findings["evidence_checked"],
                 graph_path_valid=findings["graph_path_valid"],
-                requirement_support="supported" if findings["evidence_supported"] else "unknown",
+                requirement_support="supported"
+                if findings["evidence_supported"]
+                else "unknown",
                 duplicate_status=findings["duplicate_status"],
                 missing_information=findings["missing"],
                 correction_possible=findings["correction_possible"],
@@ -807,15 +1015,34 @@ class TestReviewAutomationAgent:
                 contradiction_detected=findings["contradiction"],
                 content_hash=_content_hash(corrected),
             )
-            source = "targeted" if corrected.test_case_id in targeted_ids else ("existing" if corrected.test_case_id in existing_ids else "generated")
+            source = (
+                "targeted"
+                if corrected.test_case_id in targeted_ids
+                else (
+                    "existing"
+                    if corrected.test_case_id in existing_ids
+                    else "generated"
+                )
+            )
             automation_review = None
             if validity == TestValidity.VALID:
-                suit, auto_pri, effort, conf, auto_reasons, non_reasons, blockers, prereqs = classify_automation(corrected, profile=profile)
+                (
+                    suit,
+                    auto_pri,
+                    effort,
+                    conf,
+                    auto_reasons,
+                    non_reasons,
+                    blockers,
+                    prereqs,
+                ) = classify_automation(corrected, profile=profile)
                 layer, _ = recommend_automation_layer(corrected, profile=profile)
                 automation_review = AutomationFeasibilityReview(
                     test_case_id=corrected.test_case_id,
                     automation_suitability=suit.value,
-                    automation_score=compute_automation_signals(corrected, profile=profile)["score"],
+                    automation_score=compute_automation_signals(
+                        corrected, profile=profile
+                    )["score"],
                     automation_reasons=auto_reasons,
                     non_automation_reasons=non_reasons,
                     recommended_layer=layer.value,
@@ -824,13 +1051,49 @@ class TestReviewAutomationAgent:
                     confidence=conf.value,
                     prerequisites=prereqs,
                     blockers=blockers,
-                    test_data_requirements=list(dict.fromkeys((corrected.preconditions or [])[:4] + (["structured test_data present"] if corrected.test_data else []))),
-                    environment_requirements=["browser test environment"] if layer == AutomationLayer.UI else [],
-                    external_dependencies=list(dict.fromkeys(re.findall(r"payment gateway|sso|oauth|webhook|third-party|email provider|sms provider", " ".join(corrected.steps or []) + " " + (corrected.title or ""), re.I))),
-                    human_judgment_required=bool(_SUBJECTIVE.search(" ".join(corrected.steps or []) + " " + (corrected.expected_result or ""))),
-                    suggested_automation_scope=(automation_strategy or "Automate the deterministic assertions and keep subjective review out of scope."),
-                    recommended_assertions=[corrected.expected_result] if corrected.expected_result else [],
-                    recommended_framework_capabilities=["browser automation"] if layer == AutomationLayer.UI else ["HTTP/API assertions"] if layer in {AutomationLayer.API, AutomationLayer.CONTRACT} else [],
+                    test_data_requirements=list(
+                        dict.fromkeys(
+                            (corrected.preconditions or [])[:4]
+                            + (
+                                ["structured test_data present"]
+                                if corrected.test_data
+                                else []
+                            )
+                        )
+                    ),
+                    environment_requirements=["browser test environment"]
+                    if layer == AutomationLayer.UI
+                    else [],
+                    external_dependencies=list(
+                        dict.fromkeys(
+                            re.findall(
+                                r"payment gateway|sso|oauth|webhook|third-party|email provider|sms provider",
+                                " ".join(corrected.steps or [])
+                                + " "
+                                + (corrected.title or ""),
+                                re.I,
+                            )
+                        )
+                    ),
+                    human_judgment_required=bool(
+                        _SUBJECTIVE.search(
+                            " ".join(corrected.steps or [])
+                            + " "
+                            + (corrected.expected_result or "")
+                        )
+                    ),
+                    suggested_automation_scope=(
+                        automation_strategy
+                        or "Automate the deterministic assertions and keep subjective review out of scope."
+                    ),
+                    recommended_assertions=[corrected.expected_result]
+                    if corrected.expected_result
+                    else [],
+                    recommended_framework_capabilities=["browser automation"]
+                    if layer == AutomationLayer.UI
+                    else ["HTTP/API assertions"]
+                    if layer in {AutomationLayer.API, AutomationLayer.CONTRACT}
+                    else [],
                     generation_method="deterministic_fallback",
                 )
             else:
@@ -838,7 +1101,9 @@ class TestReviewAutomationAgent:
                     test_case_id=corrected.test_case_id,
                     automation_suitability=AutomationSuitability.NOT_EVALUATED.value,
                     automation_score=0,
-                    automation_reasons=["Automation feasibility is evaluated only after the test passes validity review."],
+                    automation_reasons=[
+                        "Automation feasibility is evaluated only after the test passes validity review."
+                    ],
                     non_automation_reasons=[f"Validity status is {validity.value}."],
                     recommended_layer=AutomationLayer.NONE.value,
                     automation_priority=AutomationPriority.NOT_RECOMMENDED.value,
@@ -869,18 +1134,40 @@ class TestReviewAutomationAgent:
         openai = get_openai_service()
         if openai.available and not force_deterministic and reviewed:
             try:
-                self._enrich_validity_with_llm(reviewed, project_id=project_id, fused=fused, routing_context=routing_context)
-                valid_subset = [item for item in reviewed if item.validity_review.validity == TestValidity.VALID.value]
+                self._enrich_validity_with_llm(
+                    reviewed,
+                    project_id=project_id,
+                    fused=fused,
+                    routing_context=routing_context,
+                )
+                valid_subset = [
+                    item
+                    for item in reviewed
+                    if item.validity_review.validity == TestValidity.VALID.value
+                ]
                 if valid_subset:
-                    self._enrich_automation_with_llm(valid_subset, project_id=project_id, fused=fused, profile=profile, routing_context=routing_context)
+                    self._enrich_automation_with_llm(
+                        valid_subset,
+                        project_id=project_id,
+                        fused=fused,
+                        profile=profile,
+                        routing_context=routing_context,
+                    )
                 meta["fallback_used"] = False
-                meta["selected_model"] = (openai.last_routing or {}).get("selected_model")
-                meta["actual_model"] = (openai.last_routing or {}).get("actual_model_used") or openai.last_chat_model
+                meta["selected_model"] = (openai.last_routing or {}).get(
+                    "selected_model"
+                )
+                meta["actual_model"] = (openai.last_routing or {}).get(
+                    "actual_model_used"
+                ) or openai.last_chat_model
             except Exception as exc:  # noqa: BLE001
                 logger.warning("validity_first_llm_failed", error=str(exc))
                 meta["llm_error"] = str(exc)[:200]
 
-        final = [apply_human_override(item, overrides.get(item.test_case.test_case_id)) for item in reviewed]
+        final = [
+            apply_human_override(item, overrides.get(item.test_case.test_case_id))
+            for item in reviewed
+        ]
         validity_summary = build_validity_summary(final)
         automation_summary = build_automation_summary(final)
         meta.update(
@@ -899,15 +1186,43 @@ class TestReviewAutomationAgent:
         )
         return final, validity_summary, automation_summary, meta
 
-    def _enrich_validity_with_llm(self, reviewed: list[ReviewedTestCase], *, project_id: str, fused: FusedContext, routing_context: ModelRoutingContext | None) -> None:
+    def _enrich_validity_with_llm(
+        self,
+        reviewed: list[ReviewedTestCase],
+        *,
+        project_id: str,
+        fused: FusedContext,
+        routing_context: ModelRoutingContext | None,
+    ) -> None:
         openai = get_openai_service()
-        ctx = routing_context or ModelRoutingContext(project_id=project_id, task_type=LLMTaskType.TEST_VALIDITY_REVIEW, selected_feature=fused.feature_context.get("name"), graph_path_count=len(fused.flow_paths or []))
+        ctx = routing_context or ModelRoutingContext(
+            project_id=project_id,
+            task_type=LLMTaskType.TEST_VALIDITY_REVIEW,
+            selected_feature=fused.feature_context.get("name"),
+            graph_path_count=len(fused.flow_paths or []),
+        )
         ctx.task_type = LLMTaskType.TEST_VALIDITY_REVIEW
         by_id = {item.test_case.test_case_id: item for item in reviewed}
         for i in range(0, len(reviewed), BATCH_SIZE):
             batch = reviewed[i : i + BATCH_SIZE]
-            payload = [{"test_case_id": item.test_case.test_case_id, "title": item.test_case.title, "steps": item.test_case.steps[:8], "expected_result": item.test_case.expected_result, "candidate_validity": item.validity_review.validity, "quality_issues": item.validity_review.quality_issues, "reasons": item.validity_review.validity_reasons} for item in batch]
-            data = openai.chat_json(self.VALIDITY_SYSTEM_PROMPT, f"project_id={project_id}\nfeature={fused.feature_context.get('name')}\nreviews={payload}", task_type=LLMTaskType.TEST_VALIDITY_REVIEW, routing_context=ctx)
+            payload = [
+                {
+                    "test_case_id": item.test_case.test_case_id,
+                    "title": item.test_case.title,
+                    "steps": item.test_case.steps[:8],
+                    "expected_result": item.test_case.expected_result,
+                    "candidate_validity": item.validity_review.validity,
+                    "quality_issues": item.validity_review.quality_issues,
+                    "reasons": item.validity_review.validity_reasons,
+                }
+                for item in batch
+            ]
+            data = openai.chat_json(
+                self.VALIDITY_SYSTEM_PROMPT,
+                f"project_id={project_id}\nfeature={fused.feature_context.get('name')}\nreviews={payload}",
+                task_type=LLMTaskType.TEST_VALIDITY_REVIEW,
+                routing_context=ctx,
+            )
             for row in data.get("reviews") or []:
                 item = by_id.get(str(row.get("test_case_id") or ""))
                 if not item:
@@ -917,35 +1232,95 @@ class TestReviewAutomationAgent:
                     item.validity_review.validity = val
                     item.final_review_status = val
                 if isinstance(row.get("validity_reasons"), list):
-                    item.validity_review.validity_reasons = [str(x) for x in row["validity_reasons"][:12]]
+                    item.validity_review.validity_reasons = [
+                        str(x) for x in row["validity_reasons"][:12]
+                    ]
                 if isinstance(row.get("quality_issues"), list):
-                    item.validity_review.quality_issues = list(dict.fromkeys(item.validity_review.quality_issues + [str(x) for x in row["quality_issues"][:12]]))
+                    item.validity_review.quality_issues = list(
+                        dict.fromkeys(
+                            item.validity_review.quality_issues
+                            + [str(x) for x in row["quality_issues"][:12]]
+                        )
+                    )
                 if isinstance(row.get("missing_information"), list):
-                    item.validity_review.missing_information = [str(x) for x in row["missing_information"][:12]]
+                    item.validity_review.missing_information = [
+                        str(x) for x in row["missing_information"][:12]
+                    ]
                 if row.get("correction_possible") is not None:
-                    item.validity_review.correction_possible = bool(row["correction_possible"])
+                    item.validity_review.correction_possible = bool(
+                        row["correction_possible"]
+                    )
                 if isinstance(row.get("suggested_corrections"), list):
-                    item.validity_review.suggested_corrections = [str(x) for x in row["suggested_corrections"][:12]]
+                    item.validity_review.suggested_corrections = [
+                        str(x) for x in row["suggested_corrections"][:12]
+                    ]
                 item.validity_review.generation_method = "llm"
 
-    def _enrich_automation_with_llm(self, reviewed: list[ReviewedTestCase], *, project_id: str, fused: FusedContext, profile: AutomationCapabilityProfile | None, routing_context: ModelRoutingContext | None) -> None:
+    def _enrich_automation_with_llm(
+        self,
+        reviewed: list[ReviewedTestCase],
+        *,
+        project_id: str,
+        fused: FusedContext,
+        profile: AutomationCapabilityProfile | None,
+        routing_context: ModelRoutingContext | None,
+    ) -> None:
         openai = get_openai_service()
-        ctx = routing_context or ModelRoutingContext(project_id=project_id, task_type=LLMTaskType.AUTOMATION_FEASIBILITY_REVIEW, selected_feature=fused.feature_context.get("name"), graph_path_count=len(fused.flow_paths or []))
+        ctx = routing_context or ModelRoutingContext(
+            project_id=project_id,
+            task_type=LLMTaskType.AUTOMATION_FEASIBILITY_REVIEW,
+            selected_feature=fused.feature_context.get("name"),
+            graph_path_count=len(fused.flow_paths or []),
+        )
         ctx.task_type = LLMTaskType.AUTOMATION_FEASIBILITY_REVIEW
         by_id = {item.test_case.test_case_id: item for item in reviewed}
         for i in range(0, len(reviewed), BATCH_SIZE):
             batch = reviewed[i : i + BATCH_SIZE]
-            payload = [{"test_case_id": item.test_case.test_case_id, "title": item.test_case.title, "category": item.test_case.category, "steps": item.test_case.steps[:8], "expected_result": item.test_case.expected_result, "candidate_suitability": item.automation_review.automation_suitability if item.automation_review else AutomationSuitability.NOT_EVALUATED.value, "candidate_layer": item.automation_review.recommended_layer if item.automation_review else AutomationLayer.NONE.value, "profile_configured": profile is not None} for item in batch]
-            data = openai.chat_json(self.AUTOMATION_SYSTEM_PROMPT, f"project_id={project_id}\nfeature={fused.feature_context.get('name')}\nreviews={payload}", task_type=LLMTaskType.AUTOMATION_FEASIBILITY_REVIEW, routing_context=ctx)
+            payload = [
+                {
+                    "test_case_id": item.test_case.test_case_id,
+                    "title": item.test_case.title,
+                    "category": item.test_case.category,
+                    "steps": item.test_case.steps[:8],
+                    "expected_result": item.test_case.expected_result,
+                    "candidate_suitability": item.automation_review.automation_suitability
+                    if item.automation_review
+                    else AutomationSuitability.NOT_EVALUATED.value,
+                    "candidate_layer": item.automation_review.recommended_layer
+                    if item.automation_review
+                    else AutomationLayer.NONE.value,
+                    "profile_configured": profile is not None,
+                }
+                for item in batch
+            ]
+            data = openai.chat_json(
+                self.AUTOMATION_SYSTEM_PROMPT,
+                f"project_id={project_id}\nfeature={fused.feature_context.get('name')}\nreviews={payload}",
+                task_type=LLMTaskType.AUTOMATION_FEASIBILITY_REVIEW,
+                routing_context=ctx,
+            )
             for row in data.get("reviews") or []:
                 item = by_id.get(str(row.get("test_case_id") or ""))
                 if not item or not item.automation_review:
                     continue
                 review = item.automation_review
-                for field in ("automation_suitability", "recommended_layer", "automation_priority", "estimated_effort", "confidence", "suggested_automation_scope"):
+                for field in (
+                    "automation_suitability",
+                    "recommended_layer",
+                    "automation_priority",
+                    "estimated_effort",
+                    "confidence",
+                    "suggested_automation_scope",
+                ):
                     if row.get(field):
                         setattr(review, field, str(row[field]))
-                for field in ("automation_reasons", "non_automation_reasons", "blockers", "prerequisites", "recommended_assertions"):
+                for field in (
+                    "automation_reasons",
+                    "non_automation_reasons",
+                    "blockers",
+                    "prerequisites",
+                    "recommended_assertions",
+                ):
                     if isinstance(row.get(field), list):
                         setattr(review, field, [str(x) for x in row[field][:12]])
                 review.generation_method = "llm"

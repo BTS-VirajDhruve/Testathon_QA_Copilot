@@ -39,10 +39,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _create_project(client: TestClient, name: str, root: str | None = None) -> dict:
@@ -52,7 +50,9 @@ def _create_project(client: TestClient, name: str, root: str | None = None) -> d
     return client.post("/api/projects", json=body).json()
 
 
-def _import_flow(client: TestClient, project_id: str, root: str, branches: list) -> dict:
+def _import_flow(
+    client: TestClient, project_id: str, root: str, branches: list
+) -> dict:
     return client.post(
         f"/api/projects/{project_id}/flow/import",
         json={"root": root, "branches": branches},
@@ -198,12 +198,24 @@ def test_vector_rag_no_cross_project_hits(client):
         json={"filename": "b.md", "text": f"{shared_text} project-beta-only"},
     )
 
-    hits_a = client.get(f"/api/projects/{a['id']}/search", params={"q": shared_text}).json()
-    hits_b = client.get(f"/api/projects/{b['id']}/search", params={"q": shared_text}).json()
+    hits_a = client.get(
+        f"/api/projects/{a['id']}/search", params={"q": shared_text}
+    ).json()
+    hits_b = client.get(
+        f"/api/projects/{b['id']}/search", params={"q": shared_text}
+    ).json()
 
     # API may return list or {hits: [...]} depending on route — normalize
-    list_a = hits_a if isinstance(hits_a, list) else hits_a.get("hits") or hits_a.get("results") or []
-    list_b = hits_b if isinstance(hits_b, list) else hits_b.get("hits") or hits_b.get("results") or []
+    list_a = (
+        hits_a
+        if isinstance(hits_a, list)
+        else hits_a.get("hits") or hits_a.get("results") or []
+    )
+    list_b = (
+        hits_b
+        if isinstance(hits_b, list)
+        else hits_b.get("hits") or hits_b.get("results") or []
+    )
 
     contents_a = " ".join(str(h.get("content", "")) for h in list_a)
     contents_b = " ".join(str(h.get("content", "")) for h in list_b)
@@ -215,7 +227,9 @@ def test_vector_rag_no_cross_project_hits(client):
 
 def test_empty_project_vector_search(client):
     empty = _create_project(client, "No Knowledge")
-    hits = client.get(f"/api/projects/{empty['id']}/search", params={"q": "anything"}).json()
+    hits = client.get(
+        f"/api/projects/{empty['id']}/search", params={"q": "anything"}
+    ).json()
     list_hits = hits if isinstance(hits, list) else hits.get("hits") or []
     assert list_hits == []
 
@@ -231,8 +245,12 @@ def test_test_case_keys_do_not_collide_across_projects(client):
     a = _create_project(client, "Proj A", "Checkout")
     b = _create_project(client, "Proj B", "Upload")
     store = get_graph_store()
-    store.upsert_test_case(a["id"], {"test_case_id": "TC-001", "title": "Checkout happy path"})
-    store.upsert_test_case(b["id"], {"test_case_id": "TC-001", "title": "Upload happy path"})
+    store.upsert_test_case(
+        a["id"], {"test_case_id": "TC-001", "title": "Checkout happy path"}
+    )
+    store.upsert_test_case(
+        b["id"], {"test_case_id": "TC-001", "title": "Upload happy path"}
+    )
     store.persist()
 
     tests_a = client.get(f"/api/projects/{a['id']}/tests").json()
@@ -261,7 +279,12 @@ def test_hybrid_context_single_project(client):
     )
 
     fusion = get_context_fusion()
-    plan, fused = fusion.fuse(a["id"], "Generate tests for Checkout", QAIntent.TEST_GENERATION, root_feature="Checkout")
+    plan, fused = fusion.fuse(
+        a["id"],
+        "Generate tests for Checkout",
+        QAIntent.TEST_GENERATION,
+        root_feature="Checkout",
+    )
     fused = assert_project_consistency(fused, a["id"])
     assert plan is not None
     assert fused.feature_context.get("project_id") == a["id"]
@@ -332,7 +355,10 @@ def test_generic_feature_generation(client, name, root, branches, query_token):
     _import_flow(client, proj["id"], root, branches)
     client.post(
         f"/api/projects/{proj['id']}/documents/text",
-        json={"filename": f"{root.lower().replace(' ', '_')}.md", "text": f"Requirements for {root}."},
+        json={
+            "filename": f"{root.lower().replace(' ', '_')}.md",
+            "text": f"Requirements for {root}.",
+        },
     )
 
     result = client.post(
@@ -351,7 +377,8 @@ def test_generic_feature_generation(client, name, root, branches, query_token):
     assert result.get("root_feature") == root
     assert result["test_cases"], f"Expected tests for {root}"
     joined = " ".join(
-        tc.get("title", "") + " " + " ".join(tc.get("graph_path") or []) for tc in result["test_cases"]
+        tc.get("title", "") + " " + " ".join(tc.get("graph_path") or [])
+        for tc in result["test_cases"]
     )
     assert query_token.lower() in joined.lower() or root.lower() in joined.lower()
     # Sign In must not appear unless it is the feature under test

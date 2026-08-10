@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { AuthSessionShimmer } from "@/components/AuthSessionShimmer";
 import {
   type AuthSession,
   clearAuthSession,
@@ -137,7 +138,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [error, login, logout, refreshSession, session, status]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {status === "loading" ? <AuthSessionShimmer /> : children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

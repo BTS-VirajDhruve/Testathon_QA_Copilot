@@ -121,7 +121,9 @@ def validate_scenario_steps(scenario: ManualScenarioInput) -> list[str]:
                     break
             missing = placeholders - headers
             if missing:
-                issues.append(f"example_headers_missing_placeholders:{','.join(sorted(missing))}")
+                issues.append(
+                    f"example_headers_missing_placeholders:{','.join(sorted(missing))}"
+                )
             if len(scenario.examples) < 1:
                 issues.append("outline_needs_data_rows")
     elif scenario.examples and not placeholders:
@@ -129,9 +131,13 @@ def validate_scenario_steps(scenario: ManualScenarioInput) -> list[str]:
     return issues
 
 
-def _classification_from_scenario(sc: ManualScenarioInput, default_priority: Priority) -> TestClassification:
+def _classification_from_scenario(
+    sc: ManualScenarioInput, default_priority: Priority
+) -> TestClassification:
     behavior = list(sc.behavior) or (
-        [TestBehavior.NEGATIVE] if "negative" in (sc.name or "").lower() else [TestBehavior.POSITIVE]
+        [TestBehavior.NEGATIVE]
+        if "negative" in (sc.name or "").lower()
+        else [TestBehavior.POSITIVE]
     )
     suites = list(sc.suite_types) or [SuiteType.REGRESSION]
     return TestClassification(
@@ -163,7 +169,9 @@ def scenario_to_test_case(
     tags = build_normalized_tags(cls, extra=sc.tags)
     expected = " and ".join(sc.expected_results) if sc.expected_results else ""
     if not expected and sc.bdd_steps:
-        expected = " ".join(s.text for s in sc.bdd_steps if s.keyword in {"Then", "And"})
+        expected = " ".join(
+            s.text for s in sc.bdd_steps if s.keyword in {"Then", "And"}
+        )
     steps = list(sc.standard_steps)
     if not steps and sc.bdd_steps:
         steps = [s.text for s in sc.bdd_steps if s.keyword in {"When", "And", "But"}]
@@ -219,7 +227,6 @@ def scenario_to_test_case(
             conversion_notes=notes,
         )
         bdd.gherkin_text = render_gherkin(bdd, tags_before_scenario=True)
-        status = "ok"
     else:
         bdd.feature_reference = feature_reference
         bdd.feature_description = user_story.to_description()
@@ -236,7 +243,9 @@ def scenario_to_test_case(
         issues2 = validate_bdd_scenario(bdd)
         if issues2:
             bdd.conversion_status = "needs_revision"
-            bdd.conversion_notes = list(dict.fromkeys((bdd.conversion_notes or []) + issues2))
+            bdd.conversion_notes = list(
+                dict.fromkeys((bdd.conversion_notes or []) + issues2)
+            )
 
     payload = tc.model_dump(mode="json")
     payload["bdd_scenario"] = bdd.model_dump(mode="json") if bdd else None
@@ -281,10 +290,15 @@ def create_manual_feature_tests(
             if row.get("project_id") == project_id and row.get("test_case_id") == tid:
                 existing = row
                 break
-        if existing and not existing.get("human_edited") and existing.get("generation_method") not in {
-            "manual",
-            None,
-        }:
+        if (
+            existing
+            and not existing.get("human_edited")
+            and existing.get("generation_method")
+            not in {
+                "manual",
+                None,
+            }
+        ):
             if not body.force_overwrite_generated:
                 raise ValueError(f"refuse_overwrite_generated:{tid}")
         store.upsert_test_case(project_id, payload)

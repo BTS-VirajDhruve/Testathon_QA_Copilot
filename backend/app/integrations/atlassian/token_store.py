@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -81,8 +81,8 @@ def set_tokens(
     if refresh_token:
         conn["encrypted_refresh_token"] = encrypt_secret(refresh_token)
     if expires_in is not None:
-        expiry = datetime.now(timezone.utc).timestamp() + max(0, int(expires_in) - 60)
-        conn["token_expiry"] = datetime.fromtimestamp(expiry, tz=timezone.utc).isoformat()
+        expiry = datetime.now(UTC).timestamp() + max(0, int(expires_in) - 60)
+        conn["token_expiry"] = datetime.fromtimestamp(expiry, tz=UTC).isoformat()
     if scopes is not None:
         conn["granted_scopes"] = scopes
     conn["status"] = "connected"
@@ -114,8 +114,10 @@ def token_expired() -> bool:
     if not conn or not conn.get("token_expiry"):
         return False
     try:
-        expiry = datetime.fromisoformat(str(conn["token_expiry"]).replace("Z", "+00:00"))
-        return datetime.now(timezone.utc) >= expiry
+        expiry = datetime.fromisoformat(
+            str(conn["token_expiry"]).replace("Z", "+00:00")
+        )
+        return datetime.now(UTC) >= expiry
     except Exception:  # noqa: BLE001
         return False
 

@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
+from app.integrations.atlassian import token_store
 from app.integrations.atlassian.adf import adf_to_text
 from app.integrations.atlassian.client import get_atlassian_client
 from app.integrations.atlassian.html_sanitize import html_to_text
@@ -15,7 +16,6 @@ from app.integrations.atlassian.schemas import (
     ConfluencePageSummary,
     ConfluenceSpaceSummary,
 )
-from app.integrations.atlassian import token_store
 
 
 def _site_url() -> str:
@@ -30,7 +30,11 @@ def _web_url_for_page(page_id: str, links: dict[str, Any] | None = None) -> str 
         if webui.startswith("http"):
             return webui
         if site:
-            return f"{site}/wiki{webui}" if not webui.startswith("/wiki") else f"{site}{webui}"
+            return (
+                f"{site}/wiki{webui}"
+                if not webui.startswith("/wiki")
+                else f"{site}{webui}"
+            )
     site = _site_url()
     return f"{site}/wiki/pages/{page_id}" if site else None
 
@@ -89,7 +93,9 @@ class ConfluenceAdapter:
                     type=sp.get("type"),
                     status=sp.get("status"),
                     description=desc,
-                    web_url=_web_url_for_page(str(sp.get("id") or ""), sp.get("_links")),
+                    web_url=_web_url_for_page(
+                        str(sp.get("id") or ""), sp.get("_links")
+                    ),
                 )
             )
         return out, next_cursor
@@ -111,7 +117,9 @@ class ConfluenceAdapter:
             params["title"] = title
         resp = self.client.request(
             "GET",
-            self.client.confluence_url(cloud_id, f"/wiki/api/v2/spaces/{space_id}/pages"),
+            self.client.confluence_url(
+                cloud_id, f"/wiki/api/v2/spaces/{space_id}/pages"
+            ),
             product="confluence",
             params=params,
         )
@@ -120,7 +128,8 @@ class ConfluenceAdapter:
         next_cursor = None
         links = data.get("_links") or {}
         if isinstance(links.get("next"), str):
-            from urllib.parse import parse_qs, urlparse as _urlparse
+            from urllib.parse import parse_qs
+            from urllib.parse import urlparse as _urlparse
 
             qs = parse_qs(_urlparse(links["next"]).query)
             next_cursor = (qs.get("cursor") or [None])[0]
@@ -132,13 +141,19 @@ class ConfluenceAdapter:
                 ConfluencePageSummary(
                     id=pid,
                     space_id=str(page.get("spaceId") or space_id),
-                    parent_id=str(page.get("parentId")) if page.get("parentId") else None,
+                    parent_id=str(page.get("parentId"))
+                    if page.get("parentId")
+                    else None,
                     title=str(page.get("title") or pid),
                     status=page.get("status"),
                     created_at=page.get("createdAt"),
-                    updated_at=(version.get("createdAt") if isinstance(version, dict) else None)
+                    updated_at=(
+                        version.get("createdAt") if isinstance(version, dict) else None
+                    )
                     or page.get("createdAt"),
-                    version_number=version.get("number") if isinstance(version, dict) else None,
+                    version_number=version.get("number")
+                    if isinstance(version, dict)
+                    else None,
                     web_url=_web_url_for_page(pid, page.get("_links")),
                     has_children=bool(page.get("childPosition") is not None),
                 )
@@ -164,7 +179,11 @@ class ConfluenceAdapter:
             import json
 
             try:
-                adf = json.loads(atlas_doc["value"]) if isinstance(atlas_doc["value"], str) else atlas_doc["value"]
+                adf = (
+                    json.loads(atlas_doc["value"])
+                    if isinstance(atlas_doc["value"], str)
+                    else atlas_doc["value"]
+                )
                 body_text = adf_to_text(adf)
             except Exception:  # noqa: BLE001
                 body_text = str(atlas_doc.get("value") or "")
@@ -176,9 +195,13 @@ class ConfluenceAdapter:
             title=str(data.get("title") or page_id),
             status=data.get("status"),
             created_at=data.get("createdAt"),
-            updated_at=(version.get("createdAt") if isinstance(version, dict) else None),
+            updated_at=(
+                version.get("createdAt") if isinstance(version, dict) else None
+            ),
             version_number=version.get("number") if isinstance(version, dict) else None,
-            web_url=_web_url_for_page(str(data.get("id") or page_id), data.get("_links")),
+            web_url=_web_url_for_page(
+                str(data.get("id") or page_id), data.get("_links")
+            ),
             body_text=body_text,
             breadcrumb=[],
             labels=[],

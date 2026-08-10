@@ -7,11 +7,10 @@ LLM-first changes can be compared against a stable contract.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agents.specialists import TestCaseAgent
 from app.models.schemas import FusedContext
 from app.models.schemas import TestCase as QATestCase
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -47,10 +46,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _sample_fused() -> FusedContext:
@@ -202,7 +199,10 @@ def test_copilot_query_baseline_schema_contract(client):
     assert result["intent"] in {"test_generation", "general_qa"}
     assert result["retrieval_plan"]["use_user_flow_graph"] is True
     assert result["retrieval_plan"]["use_graph_rag"] is True
-    assert "flow_paths" in result["fused_context_summary"] or result["fused_context_summary"]
+    assert (
+        "flow_paths" in result["fused_context_summary"]
+        or result["fused_context_summary"]
+    )
 
     required_tc_fields = {
         "test_case_id",
@@ -223,9 +223,10 @@ def test_copilot_query_baseline_schema_contract(client):
         "generation_method",
         "evidence",
     }
-    assert len(result["test_cases"]) >= len(result["discovered_graph_paths"]) or len(
-        result["test_cases"]
-    ) >= 8
+    assert (
+        len(result["test_cases"]) >= len(result["discovered_graph_paths"])
+        or len(result["test_cases"]) >= 8
+    )
     for tc in result["test_cases"]:
         assert required_tc_fields.issubset(tc.keys())
         assert isinstance(tc["graph_path"], list) and tc["graph_path"]
@@ -234,7 +235,8 @@ def test_copilot_query_baseline_schema_contract(client):
     # Critic may add cases, but baseline still exposes trace + evidence
     assert result["execution_trace"]
     assert any(
-        "Initial Test Generation" in step["step"] or "Test Cases Generated" in step["step"]
+        "Initial Test Generation" in step["step"]
+        or "Test Cases Generated" in step["step"]
         for step in result["execution_trace"]
     )
     assert result["evidence"]

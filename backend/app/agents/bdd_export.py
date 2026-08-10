@@ -220,7 +220,9 @@ def render_import_csv(scenarios: list[BDDScenario]) -> str:
             text = (step.text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
             text = text.replace("|", "\\|")
             step_lines.append(f"{keyword}|{text}")
-        description = (sc.feature_description or "").replace("\r\n", "\n").replace("\r", "\n")
+        description = (
+            (sc.feature_description or "").replace("\r\n", "\n").replace("\r", "\n")
+        )
         writer.writerow(
             [
                 sc.feature or "",
@@ -262,7 +264,9 @@ def render_steps_csv(scenarios: list[BDDScenario]) -> str:
     )
     for sc in scenarios:
         order = 0
-        description = (sc.feature_description or "").replace("\r\n", "\n").replace("\r", "\n")
+        description = (
+            (sc.feature_description or "").replace("\r\n", "\n").replace("\r", "\n")
+        )
         for step in list(sc.background or []) + list(sc.steps or []):
             order += 1
             writer.writerow(
@@ -318,11 +322,19 @@ def _validity_map(analysis: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for row in analysis.get("reviewed_test_cases") or []:
         try:
-            reviewed = ReviewedTestCase.model_validate(row) if not isinstance(row, ReviewedTestCase) else row
+            reviewed = (
+                ReviewedTestCase.model_validate(row)
+                if not isinstance(row, ReviewedTestCase)
+                else row
+            )
         except Exception:  # noqa: BLE001
             continue
         tid = reviewed.test_case.test_case_id if reviewed.test_case else None
-        validity = getattr(reviewed.validity_review, "validity", None) if reviewed.validity_review else None
+        validity = (
+            getattr(reviewed.validity_review, "validity", None)
+            if reviewed.validity_review
+            else None
+        )
         if tid and validity is not None:
             out[tid] = str(validity.value if hasattr(validity, "value") else validity)
     for bucket, label in (
@@ -342,13 +354,19 @@ def _automation_tags(analysis: dict[str, Any], test_id: str) -> list[str]:
     tags: list[str] = []
     for row in analysis.get("reviewed_test_cases") or []:
         try:
-            reviewed = ReviewedTestCase.model_validate(row) if not isinstance(row, ReviewedTestCase) else row
+            reviewed = (
+                ReviewedTestCase.model_validate(row)
+                if not isinstance(row, ReviewedTestCase)
+                else row
+            )
         except Exception:  # noqa: BLE001
             continue
         tid = reviewed.test_case.test_case_id if reviewed.test_case else None
         if tid != test_id or not reviewed.automation_review:
             continue
-        suit = str(getattr(reviewed.automation_review, "automation_suitability", "") or "").lower()
+        suit = str(
+            getattr(reviewed.automation_review, "automation_suitability", "") or ""
+        ).lower()
         mapping = {
             "automate": "@automation-yes",
             "automate_with_conditions": "@automation-partial",
@@ -357,7 +375,9 @@ def _automation_tags(analysis: dict[str, Any], test_id: str) -> list[str]:
         }
         if suit in mapping:
             tags.append(mapping[suit])
-        layer = str(getattr(reviewed.automation_review, "recommended_layer", "") or "").lower()
+        layer = str(
+            getattr(reviewed.automation_review, "recommended_layer", "") or ""
+        ).lower()
         if layer in {"ui", "api", "integration"}:
             tags.append(f"@{layer}")
         break
@@ -407,7 +427,10 @@ def _collect_logical_tests(
         raise BDDExportError(
             "PROJECT_MISMATCH",
             "Analysis project_id does not match the requested project.",
-            {"analysis_project_id": analysis.get("project_id"), "project_id": project_id},
+            {
+                "analysis_project_id": analysis.get("project_id"),
+                "project_id": project_id,
+            },
         )
 
     existing_bdd: dict[str, BDDScenario] = {}
@@ -429,7 +452,11 @@ def _collect_logical_tests(
         except Exception:  # noqa: BLE001
             continue
         if art.bdd_scenario and art.bdd_scenario.conversion_status == "ok":
-            key = art.logical_test_id or art.source_test_id or art.bdd_scenario.source_test_id
+            key = (
+                art.logical_test_id
+                or art.source_test_id
+                or art.bdd_scenario.source_test_id
+            )
             if key:
                 existing_bdd[key] = art.bdd_scenario
 
@@ -546,7 +573,12 @@ def _apply_declarative_style(scenario: BDDScenario) -> BDDScenario:
                 text,
                 flags=re.I,
             )
-            text = re.sub(r"\bopens?\s+url\s+\S+", "navigates to the relevant page", text, flags=re.I)
+            text = re.sub(
+                r"\bopens?\s+url\s+\S+",
+                "navigates to the relevant page",
+                text,
+                flags=re.I,
+            )
         new_steps.append(BDDStep(keyword=step.keyword, text=text.strip()))
     return scenario.model_copy(update={"steps": new_steps})
 
@@ -596,7 +628,9 @@ def _resolve_scenarios(
     seen_names: set[str] = set()
 
     for tc in tests:
-        feature = feature_fallback or (tc.graph_path[0] if tc.graph_path else "Generated Feature")
+        feature = feature_fallback or (
+            tc.graph_path[0] if tc.graph_path else "Generated Feature"
+        )
         reused_sc = existing_bdd.get(tc.test_case_id)
         scenario: BDDScenario | None = None
         notes: list[str] = []
@@ -608,7 +642,9 @@ def _resolve_scenarios(
             if not scenario.feature_description:
                 from app.agents.bdd import build_feature_description
 
-                scenario.feature_description = build_feature_description(scenario.feature)
+                scenario.feature_description = build_feature_description(
+                    scenario.feature
+                )
             if not scenario.rule:
                 from app.agents.bdd import scenario_section
 
@@ -665,7 +701,9 @@ def _limit_shared_background(scenarios: list[BDDScenario]) -> list[BDDScenario]:
     """Cap shared background length; excess stays in scenarios (renderer extracts shared)."""
     if not scenarios:
         return scenarios
-    backgrounds = [tuple((s.keyword, s.text) for s in sc.background) for sc in scenarios]
+    backgrounds = [
+        tuple((s.keyword, s.text) for s in sc.background) for sc in scenarios
+    ]
     if not backgrounds or not all(b == backgrounds[0] and b for b in backgrounds):
         return scenarios
     shared = backgrounds[0]
@@ -691,7 +729,9 @@ def _limit_shared_background(scenarios: list[BDDScenario]) -> list[BDDScenario]:
 
 def _validate_feature_document(content: str, scenarios: list[BDDScenario]) -> list[str]:
     issues: list[str] = []
-    feature_count = sum(1 for line in content.splitlines() if line.startswith("Feature:"))
+    feature_count = sum(
+        1 for line in content.splitlines() if line.startswith("Feature:")
+    )
     if feature_count != 1:
         issues.append(f"feature_count_{feature_count}")
     if "Scenario:" not in content and "Scenario Outline:" not in content:
@@ -699,7 +739,9 @@ def _validate_feature_document(content: str, scenarios: list[BDDScenario]) -> li
     names = [normalize_name(sc.scenario_name) for sc in scenarios]
     if len(names) != len(set(names)):
         issues.append("duplicate_scenario_names_in_file")
-    background_lines = [line for line in content.splitlines() if line.strip() == "Background:"]
+    background_lines = [
+        line for line in content.splitlines() if line.strip() == "Background:"
+    ]
     if len(background_lines) > 1:
         issues.append("multiple_backgrounds")
     return issues
@@ -725,9 +767,13 @@ def build_export_preview(
     store = get_graph_store()
     project = store.get_project(project_id)
     if not project:
-        raise BDDExportError("ANALYSIS_NOT_FOUND", "Project not found.", {"project_id": project_id})
+        raise BDDExportError(
+            "ANALYSIS_NOT_FOUND", "Project not found.", {"project_id": project_id}
+        )
 
-    analysis = analysis if analysis is not None else store.get_latest_analysis(project_id)
+    analysis = (
+        analysis if analysis is not None else store.get_latest_analysis(project_id)
+    )
     if not analysis:
         raise BDDExportError(
             "ANALYSIS_NOT_FOUND",
@@ -768,7 +814,11 @@ def build_export_preview(
     )
     excluded = scope_excluded + conversion_excluded
 
-    if request.strict and conversion_excluded and request.scope == "all_final_generated":
+    if (
+        request.strict
+        and conversion_excluded
+        and request.scope == "all_final_generated"
+    ):
         raise BDDExportError(
             "BDD_CONVERSION_FAILED",
             "One or more tests could not be converted into valid Gherkin.",
@@ -885,7 +935,9 @@ def build_export_preview(
     )
 
 
-def build_export_package(project_id: str, request: BDDExportRequest) -> BDDExportPackage:
+def build_export_package(
+    project_id: str, request: BDDExportRequest
+) -> BDDExportPackage:
     preview = build_export_preview(project_id, request)
     project_name = preview.manifest.project_name or "project"
     analysis_slug = slug_tag(preview.analysis_id) or "latest"
@@ -921,7 +973,9 @@ def build_export_package(project_id: str, request: BDDExportRequest) -> BDDExpor
             zf.writestr(f"features/{file.filename}", file.content.encode("utf-8"))
         zf.writestr(
             "export-manifest.json",
-            json.dumps(preview.manifest.model_dump(mode="json"), indent=2).encode("utf-8"),
+            json.dumps(preview.manifest.model_dump(mode="json"), indent=2).encode(
+                "utf-8"
+            ),
         )
         report_lines = [
             "# BDD Export Report",

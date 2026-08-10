@@ -23,7 +23,6 @@ from app.models.schemas import (
     new_id,
 )
 
-
 _VALIDITY_TO_FINDING = {
     TestValidity.INVALID.value: ReviewFindingType.INVALID_TEST,
     TestValidity.NEEDS_REVISION.value: ReviewFindingType.NEEDS_REVISION,
@@ -65,7 +64,9 @@ def build_suite_review(
         suggestions = list(rev.validity_review.suggested_corrections or [])
         issues = list(rev.validity_review.quality_issues or [])
         missing_info = list(rev.validity_review.missing_information or [])
-        instruction = "; ".join(suggestions or issues or ["Revise test to satisfy validity gates."])
+        instruction = "; ".join(
+            suggestions or issues or ["Revise test to satisfy validity gates."]
+        )
         criteria = suggestions or [
             "Observable expected result present",
             "At least one When/action step",
@@ -75,15 +76,24 @@ def build_suite_review(
         finding = TestReviewFinding(
             finding_id=new_id("FIND"),
             test_case_id=tc.test_case_id,
-            severity=Priority.HIGH if validity == TestValidity.INVALID.value else Priority.MEDIUM,
+            severity=Priority.HIGH
+            if validity == TestValidity.INVALID.value
+            else Priority.MEDIUM,
             finding_type=ftype,
             explanation="; ".join(issues or [validity]),
-            affected_fields=["title", "steps", "expected_result", "graph_path", "evidence"],
+            affected_fields=[
+                "title",
+                "steps",
+                "expected_result",
+                "graph_path",
+                "evidence",
+            ],
             required_action=GeneratorRevisionMode.REVISE
             if validity != TestValidity.INSUFFICIENT_EVIDENCE.value
             else GeneratorRevisionMode.RETIRE,
             revision_instruction=instruction,
-            acceptance_criteria=criteria + ([f"Provide: {m}" for m in missing_info] if missing_info else []),
+            acceptance_criteria=criteria
+            + ([f"Provide: {m}" for m in missing_info] if missing_info else []),
         )
         per_test.append(finding)
         if finding.severity in (Priority.CRITICAL, Priority.HIGH):
@@ -102,7 +112,9 @@ def build_suite_review(
                     affected_fields=["title", "steps", "expected_result", "graph_path"],
                     required_action=GeneratorRevisionMode.RETIRE,
                     revision_instruction=f"Retire {b.test_case_id}; retain {a.test_case_id}.",
-                    acceptance_criteria=["Only one logical test remains for this fingerprint"],
+                    acceptance_criteria=[
+                        "Only one logical test remains for this fingerprint"
+                    ],
                 )
                 duplicates.append(finding)
 
@@ -110,7 +122,10 @@ def build_suite_review(
     for obl in updated_obligations:
         if not obl.mandatory:
             continue
-        if obl.status in (ObligationStatus.COVERED, ObligationStatus.INSUFFICIENT_EVIDENCE):
+        if obl.status in (
+            ObligationStatus.COVERED,
+            ObligationStatus.INSUFFICIENT_EVIDENCE,
+        ):
             continue
         category = "functional"
         if obl.obligation_type in (
@@ -128,7 +143,9 @@ def build_suite_review(
                 finding_id=new_id("MISS"),
                 obligation_ids=[obl.obligation_id],
                 category=category,
-                priority=obl.priority if isinstance(obl.priority, Priority) else Priority.HIGH,
+                priority=obl.priority
+                if isinstance(obl.priority, Priority)
+                else Priority.HIGH,
                 title=f"Missing: {obl.title}",
                 explanation=obl.description or obl.title,
                 required_graph_path=list(obl.graph_path),
@@ -151,7 +168,11 @@ def build_suite_review(
             )
         )
 
-    revise_ids = [f.test_case_id for f in per_test if f.required_action == GeneratorRevisionMode.REVISE]
+    revise_ids = [
+        f.test_case_id
+        for f in per_test
+        if f.required_action == GeneratorRevisionMode.REVISE
+    ]
     reject_ids = [
         f.test_case_id
         for f in per_test + duplicates
@@ -178,10 +199,17 @@ def build_suite_review(
     invalid_like = sum(
         1
         for f in per_test
-        if f.finding_type in (ReviewFindingType.INVALID_TEST, ReviewFindingType.NEEDS_REVISION)
+        if f.finding_type
+        in (ReviewFindingType.INVALID_TEST, ReviewFindingType.NEEDS_REVISION)
     )
-    quality = max(0.0, 100.0 - invalid_like * 5 - len(missing) * 3 - len(duplicates) * 2)
-    recommendation = "succeed" if modeled_pct >= 100 and not per_test and not missing and not duplicates else "continue"
+    quality = max(
+        0.0, 100.0 - invalid_like * 5 - len(missing) * 3 - len(duplicates) * 2
+    )
+    recommendation = (
+        "succeed"
+        if modeled_pct >= 100 and not per_test and not missing and not duplicates
+        else "continue"
+    )
 
     review = TestSuiteReview(
         review_id=new_id("REV"),

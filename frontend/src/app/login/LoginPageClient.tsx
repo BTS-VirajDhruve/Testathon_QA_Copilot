@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AuthSessionShimmer } from "@/components/AuthSessionShimmer";
 import { useAuth } from "@/lib/auth-context";
 import { resolvePostLoginRedirect } from "@/lib/auth-routing";
 
@@ -39,6 +40,10 @@ export function LoginPageClient() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (status === "loading" || status === "authenticated") {
+    return <AuthSessionShimmer />;
   }
 
   return (
@@ -81,12 +86,8 @@ export function LoginPageClient() {
           </label>
 
           <button className="btn-primary w-full justify-center" type="submit" disabled={busy}>
-            {busy || status === "loading" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <LogIn className="h-4 w-4" />
-            )}
-            <span>{busy || status === "loading" ? "Signing in..." : "Sign in"}</span>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+            <span>{busy ? "Signing in..." : "Sign in"}</span>
           </button>
           <div className="text-right text-sm">
             <Link className="text-pine-800 underline-offset-2 hover:underline" href="/forgot-password">

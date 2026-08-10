@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from app.models.enums import (
     NodeType,
@@ -13,6 +12,7 @@ from app.models.enums import (
     RiskLevel,
 )
 from app.models.schemas import (
+    CategoryCoverage,
     CoverageObligation,
     EvidenceReference,
     FusedContext,
@@ -20,7 +20,9 @@ from app.models.schemas import (
     new_id,
 )
 
-_PERF_HINT = re.compile(r"\b(performance|latency|throughput|sla|response\s*time|load\s*test)\b", re.I)
+_PERF_HINT = re.compile(
+    r"\b(performance|latency|throughput|sla|response\s*time|load\s*test)\b", re.I
+)
 _A11Y_HINT = re.compile(r"\b(accessib|aria|wcag|keyboard|screen\s*reader)\b", re.I)
 _SECURITY_HINT = re.compile(
     r"\b(auth|permission|role|security|token|session|xss|csrf|inject|encrypt|lockout|sso|oauth)\b",
@@ -65,7 +67,9 @@ def build_coverage_obligations(
     flags = _query_flags(query)
     obligations: list[CoverageObligation] = []
     feature_id = None
-    feature_name = root_feature or (fused.feature_context or {}).get("name") or "Feature"
+    feature_name = (
+        root_feature or (fused.feature_context or {}).get("name") or "Feature"
+    )
 
     seen: set[str] = set()
 
@@ -83,7 +87,9 @@ def build_coverage_obligations(
             continue
         is_failure = bool(item.get("is_failure_path"))
         external = bool(item.get("includes_external_dependency"))
-        otype = ObligationType.FAILURE_PATH if is_failure else ObligationType.POSITIVE_FLOW
+        otype = (
+            ObligationType.FAILURE_PATH if is_failure else ObligationType.POSITIVE_FLOW
+        )
         if any("alternate" in str(p).lower() for p in path):
             otype = ObligationType.ALTERNATE_FLOW
         _add(
@@ -185,14 +191,21 @@ def build_coverage_obligations(
                         evidence_basis="business_rule",
                     )
                 )
-            elif ntype in (NodeType.ROLE.value, NodeType.PERMISSION.value, "Role", "Permission"):
+            elif ntype in (
+                NodeType.ROLE.value,
+                NodeType.PERMISSION.value,
+                "Role",
+                "Permission",
+            ):
                 _add(
                     CoverageObligation(
                         project_id=project_id,
                         obligation_type=ObligationType.ROLE_PERMISSION,
                         title=f"Role/permission: {node.name}",
                         description=node.description or f"Authorize {node.name}",
-                        priority=Priority.CRITICAL if node.is_critical else Priority.HIGH,
+                        priority=Priority.CRITICAL
+                        if node.is_critical
+                        else Priority.HIGH,
                         mandatory=True,
                         graph_path=path,
                         graph_node_ids=[node.id],
@@ -215,10 +228,14 @@ def build_coverage_obligations(
                         evidence_basis="state_node",
                     )
                 )
-            elif ntype in (
-                NodeType.FAILURE_PATH.value,
-                "FailurePath",
-            ) or node.is_failure_path:
+            elif (
+                ntype
+                in (
+                    NodeType.FAILURE_PATH.value,
+                    "FailurePath",
+                )
+                or node.is_failure_path
+            ):
                 _add(
                     CoverageObligation(
                         project_id=project_id,
@@ -274,7 +291,9 @@ def build_coverage_obligations(
             )
         if _PERF_HINT.search(text) or flags["performance"]:
             has_target = bool(
-                re.search(r"\b(\d+\s*ms|\d+\s*s|sla|p95|throughput\s*[><=])\b", text, re.I)
+                re.search(
+                    r"\b(\d+\s*ms|\d+\s*s|sla|p95|throughput\s*[><=])\b", text, re.I
+                )
             )
             if has_target:
                 _add(
@@ -331,7 +350,9 @@ def build_coverage_obligations(
                 obligation_type=ObligationType.HISTORICAL_BUG_REGRESSION,
                 title=f"Bug regression: {title}",
                 description=str(bug.get("description") or title),
-                priority=_prio_from_risk(bug.get("severity") or bug.get("risk") or "high"),
+                priority=_prio_from_risk(
+                    bug.get("severity") or bug.get("risk") or "high"
+                ),
                 mandatory=True,
                 graph_path=path,
                 bug_ids=[bid] if bid else [],
@@ -407,7 +428,9 @@ def _prioritize(items: list[CoverageObligation]) -> list[CoverageObligation]:
 
     def key(o: CoverageObligation) -> tuple[int, int, str]:
         return (
-            prio_rank.get(o.priority if isinstance(o.priority, Priority) else Priority.MEDIUM, 2),
+            prio_rank.get(
+                o.priority if isinstance(o.priority, Priority) else Priority.MEDIUM, 2
+            ),
             type_rank.get(o.obligation_type, 50),
             o.title.lower(),
         )
@@ -418,8 +441,6 @@ def _prioritize(items: list[CoverageObligation]) -> list[CoverageObligation]:
 def category_coverage_summary(
     obligations: list[CoverageObligation],
 ) -> list[CategoryCoverage]:
-    from app.models.schemas import CategoryCoverage
-
     buckets: dict[str, list[CoverageObligation]] = {}
     for o in obligations:
         if o.status == ObligationStatus.INSUFFICIENT_EVIDENCE:

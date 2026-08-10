@@ -7,13 +7,11 @@ from collections import Counter
 from typing import Any
 
 from app.models.enums import (
-    AutomationSuitability,
     ExecutionStatus,
     Priority,
     QualityAttribute,
     SuiteType,
     TestBehavior,
-    TestLevel,
     TestNature,
     TestSource,
 )
@@ -87,7 +85,10 @@ def infer_behaviors(category: str, title: str = "") -> list[TestBehavior]:
         if b not in found:
             found.append(b)
 
-    if any(k in blob for k in ("negative", "reject", "invalid", "denied", "blank", "empty name")):
+    if any(
+        k in blob
+        for k in ("negative", "reject", "invalid", "denied", "blank", "empty name")
+    ):
         add(TestBehavior.NEGATIVE)
     if any(k in blob for k in ("boundary", "limit", "max ", "min ")):
         add(TestBehavior.BOUNDARY)
@@ -105,7 +106,10 @@ def infer_behaviors(category: str, title: str = "") -> list[TestBehavior]:
         add(TestBehavior.STATE_TRANSITION)
     if any(k in blob for k in ("validation", "validate", "required field")):
         add(TestBehavior.DATA_VALIDATION)
-    if any(k in blob for k in ("positive", "successful", "happy", "valid ")) and TestBehavior.NEGATIVE not in found:
+    if (
+        any(k in blob for k in ("positive", "successful", "happy", "valid "))
+        and TestBehavior.NEGATIVE not in found
+    ):
         add(TestBehavior.POSITIVE)
     if not found:
         if "negative" in (category or "").lower():
@@ -120,7 +124,10 @@ def infer_behaviors(category: str, title: str = "") -> list[TestBehavior]:
 def infer_quality_attributes(category: str, title: str = "") -> list[QualityAttribute]:
     blob = f"{category} {title}".lower()
     mapping = [
-        (("security", "auth", "permission", "access denied"), QualityAttribute.SECURITY),
+        (
+            ("security", "auth", "permission", "access denied"),
+            QualityAttribute.SECURITY,
+        ),
         (("performance", "latency", "throughput"), QualityAttribute.PERFORMANCE),
         (("accessibility", "a11y", "screen reader"), QualityAttribute.ACCESSIBILITY),
         (("usability",), QualityAttribute.USABILITY),
@@ -193,10 +200,16 @@ def normalize_classification(
             ExecutionStatus.NOT_REVIEWED,
             ExecutionStatus.NOT_EVALUATED,
         }:
-            cls.execution_status = execution_from_automation_suitability(automation_suitability)
+            cls.execution_status = execution_from_automation_suitability(
+                automation_suitability
+            )
         return cls
 
-    pri = tc.priority if isinstance(tc.priority, Priority) else Priority(_enum_val(tc.priority) or "medium")
+    pri = (
+        tc.priority
+        if isinstance(tc.priority, Priority)
+        else Priority(_enum_val(tc.priority) or "medium")
+    )
     execution = ExecutionStatus.NOT_REVIEWED
     if already_automated:
         execution = ExecutionStatus.AUTOMATED
@@ -223,7 +236,10 @@ def sync_legacy_category(classification: TestClassification) -> str:
         return "security"
     if SuiteType.EXPLORATORY in classification.suite_types:
         return "exploratory"
-    if SuiteType.REGRESSION in classification.suite_types and classification.nature == TestNature.FUNCTIONAL:
+    if (
+        SuiteType.REGRESSION in classification.suite_types
+        and classification.nature == TestNature.FUNCTIONAL
+    ):
         if TestBehavior.POSITIVE in classification.behavior:
             return "functional"
         return "regression"
@@ -298,7 +314,10 @@ def build_user_story(
     inferred_actor = actor or role_hint
     if not inferred_actor:
         lower = clean.lower()
-        if any(k in lower for k in ("admin", "editor", "studio", "builder", "author", "manage")):
+        if any(
+            k in lower
+            for k in ("admin", "editor", "studio", "builder", "author", "manage")
+        ):
             inferred_actor = "admin"
         else:
             inferred_actor = "user"
@@ -330,7 +349,10 @@ def section_for_classification(classification: TestClassification) -> str:
         return "COMPATIBILITY"
     if TestBehavior.CONCURRENCY in classification.behavior:
         return "CONCURRENCY"
-    if TestBehavior.DATA_VALIDATION in classification.behavior and classification.nature == TestNature.FUNCTIONAL:
+    if (
+        TestBehavior.DATA_VALIDATION in classification.behavior
+        and classification.nature == TestNature.FUNCTIONAL
+    ):
         if TestBehavior.NEGATIVE in classification.behavior:
             return "NEGATIVE"
     if any(
@@ -338,9 +360,14 @@ def section_for_classification(classification: TestClassification) -> str:
         for b in (TestBehavior.EDGE_CASE, TestBehavior.BOUNDARY)
     ):
         return "EDGE AND BOUNDARY"
-    if any(
-        b in classification.behavior for b in (TestBehavior.RECOVERY, TestBehavior.FAILURE)
-    ) or QualityAttribute.RELIABILITY in classification.quality_attributes or QualityAttribute.RESILIENCE in classification.quality_attributes:
+    if (
+        any(
+            b in classification.behavior
+            for b in (TestBehavior.RECOVERY, TestBehavior.FAILURE)
+        )
+        or QualityAttribute.RELIABILITY in classification.quality_attributes
+        or QualityAttribute.RESILIENCE in classification.quality_attributes
+    ):
         return "RELIABILITY AND RECOVERY"
     if classification.nature == TestNature.NON_FUNCTIONAL:
         return "OTHER NON-FUNCTIONAL"
@@ -371,7 +398,9 @@ def build_feature_specifications(
 ) -> list[FeatureTestSpecification]:
     groups: dict[str, list[TestCase]] = {}
     for tc in test_cases:
-        name = feature_fallback or (tc.graph_path[0] if tc.graph_path else "Generated Feature")
+        name = feature_fallback or (
+            tc.graph_path[0] if tc.graph_path else "Generated Feature"
+        )
         groups.setdefault(name, []).append(tc)
 
     specs: list[FeatureTestSpecification] = []
@@ -419,8 +448,18 @@ def classification_summary(test_cases: list[TestCase]) -> dict[str, Any]:
     return {
         "total": len(test_cases),
         "counts": category_counts(test_cases),
-        "natures": dict(Counter(_enum_val((t.classification or normalize_classification(t)).nature) for t in test_cases)),
+        "natures": dict(
+            Counter(
+                _enum_val((t.classification or normalize_classification(t)).nature)
+                for t in test_cases
+            )
+        ),
         "execution": dict(
-            Counter(_enum_val((t.classification or normalize_classification(t)).execution_status) for t in test_cases)
+            Counter(
+                _enum_val(
+                    (t.classification or normalize_classification(t)).execution_status
+                )
+                for t in test_cases
+            )
         ),
     }

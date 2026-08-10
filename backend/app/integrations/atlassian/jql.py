@@ -31,7 +31,9 @@ def build_issue_jql(
     if advanced_jql and advanced_jql.strip():
         jql = advanced_jql.strip()
         if re.search(r";|--|/\*", jql):
-            raise AtlassianIntegrationError(JQL_INVALID, "Advanced JQL contains disallowed tokens")
+            raise AtlassianIntegrationError(
+                JQL_INVALID, "Advanced JQL contains disallowed tokens"
+            )
         return jql
 
     clauses: list[str] = []
@@ -49,7 +51,9 @@ def build_issue_jql(
             return
         for v in cleaned:
             if not _SAFE_IDENT.match(v) and not re.match(r"^[\w \-./]+$", v):
-                raise AtlassianIntegrationError(JQL_INVALID, f"Invalid value for {field}")
+                raise AtlassianIntegrationError(
+                    JQL_INVALID, f"Invalid value for {field}"
+                )
         joined = ", ".join(quote(v) for v in cleaned)
         clauses.append(f"{field} in ({joined})")
 

@@ -8,6 +8,7 @@ from typing import Any
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.graph.store import get_graph_store
+from app.integrations.atlassian import source_store
 from app.integrations.atlassian.confluence import get_confluence_adapter
 from app.integrations.atlassian.errors import (
     IMPORT_LIMIT_EXCEEDED,
@@ -24,9 +25,8 @@ from app.integrations.atlassian.schemas import (
     ImportFailure,
     ImportSourceItem,
 )
-from app.integrations.atlassian import source_store
 from app.models.schemas import DocumentChunk, new_id, utc_now
-from app.rag.document_ingestion import chunk_text, get_document_ingester
+from app.rag.document_ingestion import chunk_text
 from app.rag.vector_store import get_vector_store
 
 logger = get_logger(__name__)
@@ -44,7 +44,10 @@ def _delete_document_vectors(document_id: str, project_id: str) -> None:
     if hasattr(vs, "delete_ids") and chunk_ids:
         vs.delete_ids(chunk_ids)
     # Also remove from store documents
-    if document_id in store.documents and store.documents[document_id].get("project_id") == project_id:
+    if (
+        document_id in store.documents
+        and store.documents[document_id].get("project_id") == project_id
+    ):
         del store.documents[document_id]
         store.persist()
 
@@ -116,7 +119,9 @@ def import_sources(request: AtlassianImportRequest) -> AtlassianImportReport:
     settings = get_settings()
     store = get_graph_store()
     if not store.get_project(request.qa_project_id):
-        raise AtlassianIntegrationError(PROJECT_MISMATCH, "QA project not found", status_code=404)
+        raise AtlassianIntegrationError(
+            PROJECT_MISMATCH, "QA project not found", status_code=404
+        )
 
     if len(request.sources) > settings.atlassian_import_max_items:
         raise AtlassianIntegrationError(
@@ -288,7 +293,9 @@ def _import_one(
 def sync_source(source_id: str, qa_project_id: str) -> ExternalKnowledgeSource:
     src = source_store.get_source(source_id)
     if not src or src.qa_project_id != qa_project_id:
-        raise AtlassianIntegrationError(PROJECT_MISMATCH, "Source not found in project", status_code=404)
+        raise AtlassianIntegrationError(
+            PROJECT_MISMATCH, "Source not found in project", status_code=404
+        )
     try:
         report = import_sources(
             AtlassianImportRequest(
@@ -310,7 +317,8 @@ def sync_source(source_id: str, qa_project_id: str) -> ExternalKnowledgeSource:
             fail = report.failures[0]
             src.sync_status = (
                 "permission_lost"
-                if fail.code in {"JIRA_PERMISSION_DENIED", "CONFLUENCE_PERMISSION_DENIED"}
+                if fail.code
+                in {"JIRA_PERMISSION_DENIED", "CONFLUENCE_PERMISSION_DENIED"}
                 else "remote_missing"
                 if fail.code == "RESOURCE_NOT_FOUND"
                 else "failed"

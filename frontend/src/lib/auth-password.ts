@@ -48,3 +48,16 @@ export function getResetPasswordErrorMessage(error: unknown): string {
   }
   return "Unable to reset password right now. Please try again.";
 }
+
+export function getAcceptInviteErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 400) {
+    return "This invite link is invalid or expired. Request a new invitation link.";
+  }
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Unable to accept invite right now. Please try again.";
+}

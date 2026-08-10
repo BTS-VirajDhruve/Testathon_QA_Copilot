@@ -33,7 +33,9 @@ TYPE_HINTS: dict[str, NodeType] = {
 }
 
 
-def infer_node_type(name: str, explicit: NodeType | None = None, *, is_failure: bool = False) -> NodeType:
+def infer_node_type(
+    name: str, explicit: NodeType | None = None, *, is_failure: bool = False
+) -> NodeType:
     if explicit:
         return explicit
     if is_failure:

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
@@ -17,11 +18,12 @@ from app.agents.bdd_export import (
     build_export_preview,
 )
 from app.agents.orchestrator import get_orchestrator
+from app.api.auth_dependencies import require_admin_user
 from app.db.mongo import mongo_health_signal
 from app.graph.ingestion import get_flow_ingester
 from app.graph.store import get_graph_store
 from app.graph.traversal import get_coverage_engine, get_traversal
-from app.api.auth_dependencies import require_admin_user
+from app.models.enums import Priority
 from app.models.schemas import (
     AutomationCapabilityProfile,
     AutomationReviewOverrideRequest,
@@ -32,7 +34,6 @@ from app.models.schemas import (
     SystemFlowGraph,
     utc_now,
 )
-from app.models.enums import Priority
 from app.rag.document_ingestion import get_document_ingester
 from app.rag.vector_store import get_vector_store
 
@@ -127,7 +128,9 @@ def list_projects() -> list[dict[str, Any]]:
 
 @router.post("/projects")
 def create_project(body: ProjectCreateBody) -> dict[str, Any]:
-    return get_graph_store().create_project(body.name, body.description, body.root_feature)
+    return get_graph_store().create_project(
+        body.name, body.description, body.root_feature
+    )
 
 
 @router.get("/projects/{project_id}")
@@ -153,7 +156,9 @@ def delete_project(project_id: str) -> dict[str, Any]:
         # Still delete graph/store data; surface vector failure in counts as 0
         from app.core.logging import get_logger
 
-        get_logger(__name__).warning("vector_delete_failed", project_id=project_id, error=str(exc))
+        get_logger(__name__).warning(
+            "vector_delete_failed", project_id=project_id, error=str(exc)
+        )
 
     counts = store.delete_project(project_id)
     if counts is None:
@@ -173,6 +178,7 @@ def delete_project(project_id: str) -> dict[str, Any]:
         "deleted_project_id": project_id,
         "deleted_resources": deleted_resources,
     }
+
 
 @router.get("/projects/{project_id}/flow")
 def get_flow(project_id: str) -> SystemFlowGraph:
@@ -216,7 +222,9 @@ def flow_from_text_stream(project_id: str, body: NLGraphBody) -> StreamingRespon
         q: Queue[tuple[str, dict[str, Any]] | None] = Queue()
 
         def on_progress(stage: str, message: str, meta: dict[str, Any]) -> None:
-            q.put(("progress", {"stage": stage, "message": message, "meta": meta or {}}))
+            q.put(
+                ("progress", {"stage": stage, "message": message, "meta": meta or {}})
+            )
 
         def worker() -> None:
             try:
@@ -293,7 +301,9 @@ def impact(project_id: str, node: str) -> dict[str, Any]:
 
 
 @router.post("/projects/{project_id}/documents/upload")
-async def upload_document(project_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_document(
+    project_id: str, file: UploadFile = File(...)
+) -> dict[str, Any]:
     if not get_graph_store().get_project(project_id):
         raise HTTPException(404, "Project not found")
     raw = await file.read()
@@ -373,13 +383,18 @@ def vector_search(project_id: str, q: str, top_k: int = 8) -> list[dict[str, Any
 @router.get("/projects/{project_id}/tests")
 def list_tests(project_id: str) -> list[dict[str, Any]]:
     store = get_graph_store()
-    return [tc for tc in store.test_cases.values() if tc.get("project_id") == project_id]
+    return [
+        tc for tc in store.test_cases.values() if tc.get("project_id") == project_id
+    ]
 
 
 @router.post("/projects/{project_id}/tests")
 def create_manual_tests(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """Create one Feature story with one or more manual scenarios."""
-    from app.agents.manual_tests import ManualFeatureCreateRequest, create_manual_feature_tests
+    from app.agents.manual_tests import (
+        ManualFeatureCreateRequest,
+        create_manual_feature_tests,
+    )
 
     store = get_graph_store()
     if not store.get_project(project_id):
@@ -388,11 +403,15 @@ def create_manual_tests(project_id: str, body: dict[str, Any]) -> dict[str, Any]
         req = ManualFeatureCreateRequest.model_validate(body)
         return create_manual_feature_tests(project_id, req, store)
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "MANUAL_TEST_INVALID", "message": str(exc)}) from exc
+        raise HTTPException(
+            400, detail={"code": "MANUAL_TEST_INVALID", "message": str(exc)}
+        ) from exc
 
 
 @router.put("/projects/{project_id}/tests/{test_case_id}")
-def update_manual_test(project_id: str, test_case_id: str, body: dict[str, Any]) -> dict[str, Any]:
+def update_manual_test(
+    project_id: str, test_case_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
     from app.agents.manual_tests import (
         ManualScenarioInput,
         ManualTestUpdateRequest,
@@ -405,7 +424,9 @@ def update_manual_test(project_id: str, test_case_id: str, body: dict[str, Any])
     if not existing:
         raise HTTPException(404, "Test case not found")
     req = ManualTestUpdateRequest.model_validate(body)
-    is_manual = existing.get("human_edited") or existing.get("generation_method") == "manual"
+    is_manual = (
+        existing.get("human_edited") or existing.get("generation_method") == "manual"
+    )
     if not is_manual and not req.force_overwrite_generated:
         raise HTTPException(
             409,
@@ -440,17 +461,23 @@ def update_manual_test(project_id: str, test_case_id: str, body: dict[str, Any])
             default_priority=Priority.MEDIUM,
         )
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "MANUAL_TEST_INVALID", "message": str(exc)}) from exc
+        raise HTTPException(
+            400, detail={"code": "MANUAL_TEST_INVALID", "message": str(exc)}
+        ) from exc
     return store.upsert_test_case(project_id, payload)
 
 
 @router.delete("/projects/{project_id}/tests/{test_case_id}")
-def delete_manual_test(project_id: str, test_case_id: str, force: bool = False) -> dict[str, Any]:
+def delete_manual_test(
+    project_id: str, test_case_id: str, force: bool = False
+) -> dict[str, Any]:
     store = get_graph_store()
     existing = store.get_test_case(project_id, test_case_id)
     if not existing:
         raise HTTPException(404, "Test case not found")
-    is_manual = existing.get("human_edited") or existing.get("generation_method") == "manual"
+    is_manual = (
+        existing.get("human_edited") or existing.get("generation_method") == "manual"
+    )
     if not is_manual and not force:
         raise HTTPException(
             409,
@@ -464,7 +491,9 @@ def delete_manual_test(project_id: str, test_case_id: str, force: bool = False) 
 
 
 @router.get("/projects/{project_id}/tests/export.feature")
-def export_bdd_feature(project_id: str, feature: str | None = None) -> PlainTextResponse:
+def export_bdd_feature(
+    project_id: str, feature: str | None = None
+) -> PlainTextResponse:
     store = get_graph_store()
     project = store.get_project(project_id)
     if not project:
@@ -472,7 +501,11 @@ def export_bdd_feature(project_id: str, feature: str | None = None) -> PlainText
 
     scenarios: list[BDDScenario] = []
     analysis = store.get_latest_analysis(project_id)
-    if analysis and isinstance(analysis.get("bdd_scenarios"), list) and analysis["bdd_scenarios"]:
+    if (
+        analysis
+        and isinstance(analysis.get("bdd_scenarios"), list)
+        and analysis["bdd_scenarios"]
+    ):
         for row in analysis["bdd_scenarios"]:
             try:
                 scenarios.append(BDDScenario.model_validate(row))
@@ -490,9 +523,13 @@ def export_bdd_feature(project_id: str, feature: str | None = None) -> PlainText
             except Exception:  # noqa: BLE001
                 continue
     if not scenarios:
-        raise HTTPException(404, "No BDD scenarios available to export for this project")
+        raise HTTPException(
+            404, "No BDD scenarios available to export for this project"
+        )
 
-    feature_name = feature or scenarios[0].feature or project.get("name") or "Generated Feature"
+    feature_name = (
+        feature or scenarios[0].feature or project.get("name") or "Generated Feature"
+    )
     body = render_feature_file(scenarios, feature_name=feature_name)
     filename = safe_feature_filename(feature_name, project.get("name"))
     return PlainTextResponse(
@@ -515,7 +552,9 @@ def _bdd_export_http_error(exc: BDDExportError) -> HTTPException:
 
 
 @router.post("/projects/{project_id}/analyses/latest/exports/bdd/preview")
-def preview_bdd_export(project_id: str, body: BDDExportRequest | None = None) -> dict[str, Any]:
+def preview_bdd_export(
+    project_id: str, body: BDDExportRequest | None = None
+) -> dict[str, Any]:
     """Preview Cucumber-compliant BDD export for the latest analysis."""
     try:
         preview = build_export_preview(project_id, body or BDDExportRequest())
@@ -525,7 +564,9 @@ def preview_bdd_export(project_id: str, body: BDDExportRequest | None = None) ->
 
 
 @router.post("/projects/{project_id}/analyses/latest/exports/bdd")
-def export_bdd_from_analysis(project_id: str, body: BDDExportRequest | None = None) -> Response:
+def export_bdd_from_analysis(
+    project_id: str, body: BDDExportRequest | None = None
+) -> Response:
     """Export all final generated tests as CSV (default) or .feature/ZIP from the latest analysis."""
     try:
         package = build_export_package(project_id, body or BDDExportRequest())
@@ -538,7 +579,9 @@ def export_bdd_from_analysis(project_id: str, body: BDDExportRequest | None = No
         "X-QA-Exported-Files": str(package.preview.file_count),
         "X-QA-Analysis-Id": package.analysis_id,
     }
-    return Response(content=package.content, media_type=package.content_type, headers=headers)
+    return Response(
+        content=package.content, media_type=package.content_type, headers=headers
+    )
 
 
 @router.post("/projects/{project_id}/analyses/{analysis_id}/exports/bdd/preview")
@@ -551,7 +594,10 @@ def preview_bdd_export_by_id(
     if not analysis:
         raise HTTPException(
             404,
-            detail={"code": "ANALYSIS_NOT_FOUND", "message": "No persisted analysis found."},
+            detail={
+                "code": "ANALYSIS_NOT_FOUND",
+                "message": "No persisted analysis found.",
+            },
         )
     if analysis_id not in {"latest", "current"}:
         expected = None
@@ -571,7 +617,9 @@ def preview_bdd_export_by_id(
                 },
             )
     try:
-        preview = build_export_preview(project_id, body or BDDExportRequest(), analysis=analysis)
+        preview = build_export_preview(
+            project_id, body or BDDExportRequest(), analysis=analysis
+        )
     except BDDExportError as exc:
         raise _bdd_export_http_error(exc) from exc
     return preview.model_dump(mode="json")
@@ -586,7 +634,10 @@ def export_bdd_by_id(
     if not analysis:
         raise HTTPException(
             404,
-            detail={"code": "ANALYSIS_NOT_FOUND", "message": "No persisted analysis found."},
+            detail={
+                "code": "ANALYSIS_NOT_FOUND",
+                "message": "No persisted analysis found.",
+            },
         )
     if analysis_id not in {"latest", "current"}:
         from app.agents.bdd_export import _analysis_id_for
@@ -649,8 +700,12 @@ def override_automation_review(
     payload = {
         **existing,
         "human_override": True,
-        "original_agent_recommendation": original or existing.get("original_agent_recommendation") or {},
-        "override_reason": body.override_reason or existing.get("override_reason") or "",
+        "original_agent_recommendation": original
+        or existing.get("original_agent_recommendation")
+        or {},
+        "override_reason": body.override_reason
+        or existing.get("override_reason")
+        or "",
         "override_timestamp": utc_now().isoformat(),
     }
     for field in (
@@ -663,8 +718,12 @@ def override_automation_review(
     ):
         value = getattr(body, field)
         if value:
-            if field not in payload.get("original_agent_recommendation", {}) and existing.get(field):
-                payload.setdefault("original_agent_recommendation", {})[field] = existing.get(field)
+            if field not in payload.get(
+                "original_agent_recommendation", {}
+            ) and existing.get(field):
+                payload.setdefault("original_agent_recommendation", {})[field] = (
+                    existing.get(field)
+                )
             payload[field] = value
     saved = store.set_test_review_override(project_id, test_case_id, payload)
 
@@ -673,7 +732,7 @@ def override_automation_review(
     if analysis and isinstance(analysis.get("reviewed_test_cases"), list):
         updated = False
         for item in analysis["reviewed_test_cases"]:
-            tc = (item.get("test_case") or item.get("original_test_case") or {})
+            tc = item.get("test_case") or item.get("original_test_case") or {}
             if str(tc.get("test_case_id")) != test_case_id:
                 continue
             validity_review = item.setdefault("validity_review", {})
@@ -695,11 +754,15 @@ def override_automation_review(
                     if automation_review.get(k)
                 }
             if payload.get("automation_suitability"):
-                automation_review["automation_suitability"] = payload["automation_suitability"]
+                automation_review["automation_suitability"] = payload[
+                    "automation_suitability"
+                ]
             if payload.get("automation_layer"):
                 automation_review["recommended_layer"] = payload["automation_layer"]
             if payload.get("automation_priority"):
-                automation_review["automation_priority"] = payload["automation_priority"]
+                automation_review["automation_priority"] = payload[
+                    "automation_priority"
+                ]
             if payload.get("automation_effort"):
                 automation_review["estimated_effort"] = payload["automation_effort"]
             item["override_reason"] = payload.get("override_reason")
@@ -712,13 +775,21 @@ def override_automation_review(
                 if payload.get("validity"):
                     validity_payload["validity"] = payload["validity"]
                 if payload.get("automation_suitability"):
-                    automation_payload["automation_suitability"] = payload["automation_suitability"]
+                    automation_payload["automation_suitability"] = payload[
+                        "automation_suitability"
+                    ]
                 if payload.get("automation_layer"):
-                    automation_payload["recommended_layer"] = payload["automation_layer"]
+                    automation_payload["recommended_layer"] = payload[
+                        "automation_layer"
+                    ]
                 if payload.get("automation_priority"):
-                    automation_payload["automation_priority"] = payload["automation_priority"]
+                    automation_payload["automation_priority"] = payload[
+                        "automation_priority"
+                    ]
                 if payload.get("automation_effort"):
-                    automation_payload["estimated_effort"] = payload["automation_effort"]
+                    automation_payload["estimated_effort"] = payload[
+                        "automation_effort"
+                    ]
                 saved_review["validity_review"] = validity_payload
                 saved_review["automation_review"] = automation_payload
                 saved_review["human_override"] = True
@@ -746,10 +817,14 @@ def dashboard(project_id: str) -> dict[str, Any]:
         raise HTTPException(404, "Project not found")
     graph = store.get_project_graph(project_id)
     coverage = get_coverage_engine().analyze(project_id)
-    tests = [tc for tc in store.test_cases.values() if tc.get("project_id") == project_id]
+    tests = [
+        tc for tc in store.test_cases.values() if tc.get("project_id") == project_id
+    ]
     bugs = [b for b in store.bugs.values() if b.get("project_id") == project_id]
     critical_tests = [
-        tc for tc in tests if str(tc.get("priority", "")).lower() in {"critical", "high"}
+        tc
+        for tc in tests
+        if str(tc.get("priority", "")).lower() in {"critical", "high"}
     ]
     return {
         "risk_level": "high" if coverage.critical_gaps or bugs else "medium",
@@ -837,9 +912,14 @@ def get_test_review(project_id: str) -> dict[str, Any]:
     if analysis:
         validated = QACopilotResponse.model_validate(analysis)
         if validated.reviewed_test_cases:
-            return {"project_id": project_id, "analysis": validated.model_dump(mode="json")}
+            return {
+                "project_id": project_id,
+                "analysis": validated.model_dump(mode="json"),
+            }
     reviews = list(store.list_test_reviews(project_id).values())
-    tests = [tc for tc in store.test_cases.values() if tc.get("project_id") == project_id]
+    tests = [
+        tc for tc in store.test_cases.values() if tc.get("project_id") == project_id
+    ]
     return {
         "project_id": project_id,
         "analysis": {
@@ -887,8 +967,11 @@ def latest_analysis(project_id: str) -> dict[str, Any]:
     validated = QACopilotResponse.model_validate(analysis)
     return {"project_id": project_id, "analysis": validated.model_dump(mode="json")}
 
+
 @router.post("/projects/{project_id}/coverage-closure/resume")
-def resume_coverage_closure(project_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def resume_coverage_closure(
+    project_id: str, body: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Resume an incomplete refinement loop using persisted tests + obligations."""
     store = get_graph_store()
     if not store.get_project(project_id):
@@ -908,8 +991,9 @@ def resume_coverage_closure(project_id: str, body: dict[str, Any] | None = None)
         resume_refinement=True,
         test_refinement_max_iterations=body.get("test_refinement_max_iterations"),
         test_output_format=prev.get("test_output_format") or "standard",
-        requested_outputs=list(body.get("requested_outputs") or ["test_cases", "coverage", "evidence"]),
+        requested_outputs=list(
+            body.get("requested_outputs") or ["test_cases", "coverage", "evidence"]
+        ),
     )
     result = get_orchestrator().run(req)
     return {"project_id": project_id, "analysis": result.model_dump(mode="json")}
-

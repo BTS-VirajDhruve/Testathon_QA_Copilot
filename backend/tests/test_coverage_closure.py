@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from app.agents.coverage_closure.convergence import ConvergenceController, RefinementLimits
-from app.agents.coverage_closure.matching import evaluate_obligation_coverage, match_test_to_obligation
-from app.agents.coverage_closure.obligations import build_coverage_obligations
-from app.agents.coverage_closure.revision import apply_revision_plan, create_test_for_obligation
-from app.agents.coverage_closure.suite_review import build_suite_review
+from app.agents.coverage_closure.convergence import (
+    ConvergenceController,
+    RefinementLimits,
+)
 from app.agents.coverage_closure.loop import run_refinement_loop
+from app.agents.coverage_closure.matching import (
+    match_test_to_obligation,
+)
+from app.agents.coverage_closure.obligations import build_coverage_obligations
+from app.agents.coverage_closure.revision import (
+    apply_revision_plan,
+    create_test_for_obligation,
+)
+from app.agents.coverage_closure.suite_review import build_suite_review
 from app.agents.test_review_automation import TestReviewAutomationAgent
 from app.models.enums import (
     ConvergenceStatus,
@@ -15,18 +23,16 @@ from app.models.enums import (
     ObligationStatus,
     ObligationType,
     Priority,
-    RiskLevel,
     SourceType,
 )
 from app.models.schemas import (
     CoverageObligation,
-    EvidenceReference,
     FusedContext,
     GraphNode,
     Provenance,
+    ReviewedTestCase,
     SystemFlowGraph,
     TestCase,
-    ReviewedTestCase,
     TestValidityReview,
 )
 
@@ -36,7 +42,11 @@ def _fused(**kwargs) -> FusedContext:
         feature_context={"name": "Checkout"},
         flow_paths=[["Checkout", "Pay"]],
         graph_context=[
-            {"path": ["Checkout", "Pay"], "is_failure_path": False, "includes_external_dependency": False},
+            {
+                "path": ["Checkout", "Pay"],
+                "is_failure_path": False,
+                "includes_external_dependency": False,
+            },
             {
                 "path": ["Checkout", "Payment Gateway Timeout"],
                 "is_failure_path": True,
@@ -221,7 +231,10 @@ def test_reviewer_findings_include_revision_instructions():
     assert review.per_test_findings[0].acceptance_criteria
     assert review.missing_scenario_findings
     assert review.missing_scenario_findings[0].generation_instruction
-    assert review.revision_plan.revise_test_ids or review.revision_plan.create_for_obligation_ids
+    assert (
+        review.revision_plan.revise_test_ids
+        or review.revision_plan.create_for_obligation_ids
+    )
 
 
 def test_revision_preserves_logical_id_and_history():
@@ -367,8 +380,8 @@ def test_success_requires_more_than_coverage_alone():
         mandatory=True,
         status=ObligationStatus.COVERED,
     )
-    from app.models.schemas import TestSuiteReview, TestReviewFinding
-    from app.models.enums import ReviewFindingType, GeneratorRevisionMode
+    from app.models.enums import GeneratorRevisionMode, ReviewFindingType
+    from app.models.schemas import TestReviewFinding, TestSuiteReview
 
     review = TestSuiteReview(
         project_id="p1",
@@ -407,7 +420,10 @@ def test_create_test_for_obligation_sets_link():
     tc = create_test_for_obligation(obl, fused, "p1", iteration=2)
     assert obl.obligation_id in tc.obligation_ids
     assert tc.generation_round == 2
-    assert "status" in (tc.expected_result or "").lower() or "message" in (tc.expected_result or "").lower()
+    assert (
+        "status" in (tc.expected_result or "").lower()
+        or "message" in (tc.expected_result or "").lower()
+    )
 
 
 def test_create_and_revise_pass_deterministic_validity():
@@ -530,4 +546,7 @@ def test_revision_expected_result_uses_observable_tokens():
     )
     kept = next(t for t in updated if t.test_case_id == "TC_KEEP")
     er = (kept.expected_result or "").lower()
-    assert any(tok in er for tok in ("status", "error", "message", "visible", "returned", "created"))
+    assert any(
+        tok in er
+        for tok in ("status", "error", "message", "visible", "returned", "created")
+    )

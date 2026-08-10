@@ -3,6 +3,7 @@ import {
   canManageUsers,
   normalizeRole,
   validateUserCreateInput,
+  validateUserInviteInput,
   validateUserUpdateInput,
 } from "./user-admin";
 
@@ -49,5 +50,15 @@ describe("user admin validation", () => {
         password: "short",
       })
     ).toEqual(["Name cannot be empty.", "Password must be at least 8 characters."]);
+  });
+
+  it("validates invite input fields", () => {
+    expect(
+      validateUserInviteInput({
+        name: "",
+        email: "invalid-email",
+        role: "qa",
+      })
+    ).toEqual(["Name is required.", "Email must be valid."]);
   });
 });

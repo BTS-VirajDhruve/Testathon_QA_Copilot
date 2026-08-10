@@ -1,6 +1,5 @@
 """Agents package."""
 
-from app.agents.orchestrator import QAOrchestrator, get_orchestrator
 from app.agents.bdd import (
     build_generated_artifacts,
     convert_test_to_bdd,
@@ -8,6 +7,7 @@ from app.agents.bdd import (
     render_gherkin,
     validate_bdd_scenario,
 )
+from app.agents.orchestrator import QAOrchestrator, get_orchestrator
 from app.agents.specialists import (
     BugReportAgent,
     CoverageAgent,

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.graph.store import get_graph_store
 from app.models.enums import NodeType, RiskLevel
 from app.models.schemas import (
@@ -23,7 +21,9 @@ class GraphTraversalService:
     def load_flow(self, project_id: str) -> SystemFlowGraph:
         return self.store.get_project_graph(project_id)
 
-    def resolve_root(self, project_id: str, root_feature: str | None = None) -> GraphNode | None:
+    def resolve_root(
+        self, project_id: str, root_feature: str | None = None
+    ) -> GraphNode | None:
         graph = self.load_flow(project_id)
         if root_feature:
             found = self.store.find_node_by_name(project_id, root_feature)
@@ -38,11 +38,17 @@ class GraphTraversalService:
         features = self.store.find_nodes(project_id, node_type=NodeType.FEATURE)
         return features[0] if features else None
 
-    def discover_paths(self, project_id: str, root_id: str, max_depth: int = 8) -> list[GraphPath]:
+    def discover_paths(
+        self, project_id: str, root_id: str, max_depth: int = 8
+    ) -> list[GraphPath]:
         return self.store.discover_paths(project_id, root_id, max_depth=max_depth)
 
     def branches(self, project_id: str, root_id: str) -> list[GraphNode]:
-        return [n for _, n in self.store.neighbors(root_id, direction="outgoing") if n.project_id == project_id]
+        return [
+            n
+            for _, n in self.store.neighbors(root_id, direction="outgoing")
+            if n.project_id == project_id
+        ]
 
     def node_insight(self, project_id: str, node_id: str) -> NodeInsight | None:
         node = self.store.get_node(node_id)
@@ -74,7 +80,13 @@ class GraphTraversalService:
         flows = [
             n.name
             for _, n in outgoing
-            if n.type in (NodeType.USER_FLOW, NodeType.ALTERNATE_FLOW, NodeType.STATE, NodeType.AUTHENTICATION_METHOD)
+            if n.type
+            in (
+                NodeType.USER_FLOW,
+                NodeType.ALTERNATE_FLOW,
+                NodeType.STATE,
+                NodeType.AUTHENTICATION_METHOD,
+            )
         ]
 
         existing_tests = [
@@ -90,7 +102,10 @@ class GraphTraversalService:
             b.get("title") or b.get("bug_id", "")
             for b in self.store.bugs.values()
             if b.get("project_id") == project_id
-            and node.name.lower() in (b.get("title", "") + " " + " ".join(b.get("affected_components", []))).lower()
+            and node.name.lower()
+            in (
+                b.get("title", "") + " " + " ".join(b.get("affected_components", []))
+            ).lower()
         ]
 
         risk = RiskLevel.MEDIUM
@@ -126,7 +141,9 @@ class GraphTraversalService:
             ],
         )
 
-    def impact_analysis(self, project_id: str, changed_name_or_id: str) -> ImpactAnalysisResult:
+    def impact_analysis(
+        self, project_id: str, changed_name_or_id: str
+    ) -> ImpactAnalysisResult:
         node = self.store.get_node(changed_name_or_id)
         if node and node.project_id != project_id:
             node = None
@@ -139,7 +156,9 @@ class GraphTraversalService:
             return ImpactAnalysisResult(
                 changed_node=changed_name_or_id,
                 risk_level=RiskLevel.LOW,
-                reasoning_paths=[f"Node '{changed_name_or_id}' not found in project graph."],
+                reasoning_paths=[
+                    f"Node '{changed_name_or_id}' not found in project graph."
+                ],
             )
 
         sub = self.store.impact_subgraph(node.id, max_depth=4)
@@ -149,14 +168,18 @@ class GraphTraversalService:
             if tc.get("project_id") == project_id
             and (
                 node.name.lower() in str(tc.get("graph_path", [])).lower()
-                or any(x.lower() in str(tc.get("graph_path", [])).lower() for x in sub["direct"][:10])
+                or any(
+                    x.lower() in str(tc.get("graph_path", [])).lower()
+                    for x in sub["direct"][:10]
+                )
             )
         ]
         historical = [
             b.get("bug_id") or b.get("title", "")
             for b in self.store.bugs.values()
             if b.get("project_id") == project_id
-            and node.name.lower() in (b.get("title", "") + str(b.get("affected_components", []))).lower()
+            and node.name.lower()
+            in (b.get("title", "") + str(b.get("affected_components", []))).lower()
         ]
         features = [n for n in sub["direct"] + sub["indirect"] if True]
         # Classify features vs flows heuristically via store lookup
@@ -168,7 +191,11 @@ class GraphTraversalService:
                 continue
             if found.type in (NodeType.FEATURE, NodeType.SUB_FEATURE):
                 impacted_features.append(name)
-            elif found.type in (NodeType.USER_FLOW, NodeType.AUTHENTICATION_METHOD, NodeType.ALTERNATE_FLOW):
+            elif found.type in (
+                NodeType.USER_FLOW,
+                NodeType.AUTHENTICATION_METHOD,
+                NodeType.ALTERNATE_FLOW,
+            ):
                 impacted_flows.append(name)
 
         risk = RiskLevel.MEDIUM
@@ -203,7 +230,9 @@ class CoverageEngine:
         self.store = get_graph_store()
         self.traversal = GraphTraversalService()
 
-    def analyze(self, project_id: str, root_feature: str | None = None) -> CoverageGapResult:
+    def analyze(
+        self, project_id: str, root_feature: str | None = None
+    ) -> CoverageGapResult:
         # Lazy import avoids circular import: graph ↔ agents package init
         from app.agents.dedup import dedupe_strings
 
@@ -230,15 +259,21 @@ class CoverageEngine:
                     covered_names.add(b.name.lower())
 
         covered_branches = [b.name for b in branches if b.name.lower() in covered_names]
-        uncovered_branches = [b.name for b in branches if b.name.lower() not in covered_names]
+        uncovered_branches = [
+            b.name for b in branches if b.name.lower() not in covered_names
+        ]
 
         failure_nodes = [
             n
             for n in self.store.find_nodes(project_id)
             if n.is_failure_path or n.type == NodeType.FAILURE_PATH
         ]
-        uncovered_failures = [n.name for n in failure_nodes if n.name.lower() not in covered_names]
-        covered_failures = [n.name for n in failure_nodes if n.name.lower() in covered_names]
+        uncovered_failures = [
+            n.name for n in failure_nodes if n.name.lower() not in covered_names
+        ]
+        covered_failures = [
+            n.name for n in failure_nodes if n.name.lower() in covered_names
+        ]
 
         deps = [
             n
@@ -250,23 +285,33 @@ class CoverageEngine:
         covered_deps = [n.name for n in deps if n.name.lower() in covered_names]
 
         states = self.store.find_nodes(project_id, node_type=NodeType.STATE)
-        uncovered_states = [n.name for n in states if n.name.lower() not in covered_names]
+        uncovered_states = [
+            n.name for n in states if n.name.lower() not in covered_names
+        ]
 
         rules = self.store.find_nodes(project_id, node_type=NodeType.BUSINESS_RULE)
         uncovered_rules = [n.name for n in rules if n.name.lower() not in covered_names]
 
         branch_cov = (len(covered_branches) / len(branches)) if branches else 1.0
-        failure_cov = (len(covered_failures) / len(failure_nodes)) if failure_nodes else 1.0
+        failure_cov = (
+            (len(covered_failures) / len(failure_nodes)) if failure_nodes else 1.0
+        )
         dep_cov = (len(covered_deps) / len(deps)) if deps else 1.0
         root_cov = 1.0 if covered_branches or covered_names else 0.0
 
         # Weighted overall — explained transparently
-        overall = round((0.4 * branch_cov + 0.3 * failure_cov + 0.2 * dep_cov + 0.1 * root_cov) * 100, 1)
+        overall = round(
+            (0.4 * branch_cov + 0.3 * failure_cov + 0.2 * dep_cov + 0.1 * root_cov)
+            * 100,
+            1,
+        )
 
         critical_gaps: list[str] = []
         for name in dedupe_strings(uncovered_branches):
             node = next((b for b in branches if b.name == name), None)
-            if node and (node.is_critical or node.is_external_dependency or "sso" in name.lower()):
+            if node and (
+                node.is_critical or node.is_external_dependency or "sso" in name.lower()
+            ):
                 critical_gaps.append(f"Uncovered branch: {name}")
         for name in dedupe_strings(uncovered_failures):
             critical_gaps.append(f"Uncovered failure path: {name}")
@@ -274,8 +319,13 @@ class CoverageEngine:
             critical_gaps.append(f"Uncovered external dependency: {name}")
         critical_gaps = dedupe_strings(critical_gaps)
 
-        recommended = [f"Add path coverage for {n}" for n in dedupe_strings(uncovered_branches)[:8]]
-        recommended += [f"Add negative/failure test for {n}" for n in dedupe_strings(uncovered_failures)[:5]]
+        recommended = [
+            f"Add path coverage for {n}" for n in dedupe_strings(uncovered_branches)[:8]
+        ]
+        recommended += [
+            f"Add negative/failure test for {n}"
+            for n in dedupe_strings(uncovered_failures)[:5]
+        ]
         recommended = dedupe_strings(recommended)
         notes = [
             f"Root feature coverage = 100% if any branch/path is covered, else 0% → {root_cov * 100:.0f}%",

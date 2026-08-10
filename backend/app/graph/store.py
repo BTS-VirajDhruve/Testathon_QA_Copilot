@@ -49,7 +49,9 @@ class GraphStoreProtocol(Protocol):
         *,
         max_depth: int = 8,
     ) -> list[GraphPath]: ...
-    def impact_subgraph(self, node_id: str, *, max_depth: int = 4) -> dict[str, Any]: ...
+    def impact_subgraph(
+        self, node_id: str, *, max_depth: int = 4
+    ) -> dict[str, Any]: ...
 
 
 class InMemoryGraphStore:
@@ -101,7 +103,9 @@ class InMemoryGraphStore:
             self.persist()
         return payload
 
-    def get_test_case(self, project_id: str, test_case_id: str) -> dict[str, Any] | None:
+    def get_test_case(
+        self, project_id: str, test_case_id: str
+    ) -> dict[str, Any] | None:
         key = self.artifact_key(project_id, test_case_id)
         with self._lock:
             row = self.test_cases.get(key)
@@ -117,7 +121,10 @@ class InMemoryGraphStore:
         key = self.artifact_key(project_id, test_case_id)
         with self._lock:
             removed = False
-            if key in self.test_cases and self.test_cases[key].get("project_id") == project_id:
+            if (
+                key in self.test_cases
+                and self.test_cases[key].get("project_id") == project_id
+            ):
                 del self.test_cases[key]
                 removed = True
             legacy = self.test_cases.get(test_case_id)
@@ -128,7 +135,9 @@ class InMemoryGraphStore:
                 self.persist()
             return removed
 
-    def update_project_meta(self, project_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+    def update_project_meta(
+        self, project_id: str, patch: dict[str, Any]
+    ) -> dict[str, Any] | None:
         with self._lock:
             project = self.projects.get(project_id)
             if not project:
@@ -162,7 +171,9 @@ class InMemoryGraphStore:
     def get_latest_analysis(self, project_id: str) -> dict[str, Any] | None:
         return self.latest_analyses.get(project_id)
 
-    def get_test_review(self, project_id: str, test_case_id: str) -> dict[str, Any] | None:
+    def get_test_review(
+        self, project_id: str, test_case_id: str
+    ) -> dict[str, Any] | None:
         return self.test_reviews.get(self.artifact_key(project_id, test_case_id))
 
     def list_test_reviews(self, project_id: str) -> dict[str, dict[str, Any]]:
@@ -175,7 +186,9 @@ class InMemoryGraphStore:
                 out[str(value.get("test_case_id") or key)] = value
         return out
 
-    def set_test_review(self, project_id: str, test_case_id: str, review: dict[str, Any]) -> dict[str, Any]:
+    def set_test_review(
+        self, project_id: str, test_case_id: str, review: dict[str, Any]
+    ) -> dict[str, Any]:
         key = self.artifact_key(project_id, test_case_id)
         payload = {**review, "project_id": project_id, "test_case_id": test_case_id}
         with self._lock:
@@ -183,7 +196,9 @@ class InMemoryGraphStore:
             self.persist()
         return payload
 
-    def bulk_set_test_reviews(self, project_id: str, reviews: list[dict[str, Any]]) -> None:
+    def bulk_set_test_reviews(
+        self, project_id: str, reviews: list[dict[str, Any]]
+    ) -> None:
         with self._lock:
             for review in reviews:
                 test_case_id = str(review.get("test_case_id") or "")
@@ -197,7 +212,9 @@ class InMemoryGraphStore:
                 }
             self.persist()
 
-    def get_automation_capability_profile(self, project_id: str) -> dict[str, Any] | None:
+    def get_automation_capability_profile(
+        self, project_id: str
+    ) -> dict[str, Any] | None:
         project = self.projects.get(project_id)
         if not project:
             return None
@@ -253,8 +270,12 @@ class InMemoryGraphStore:
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            self.nodes = {k: GraphNode.model_validate(v) for k, v in raw.get("nodes", {}).items()}
-            self.edges = {k: GraphEdge.model_validate(v) for k, v in raw.get("edges", {}).items()}
+            self.nodes = {
+                k: GraphNode.model_validate(v) for k, v in raw.get("nodes", {}).items()
+            }
+            self.edges = {
+                k: GraphEdge.model_validate(v) for k, v in raw.get("edges", {}).items()
+            }
             self.projects = raw.get("projects", {})
             self.documents = raw.get("documents", {})
             self.test_cases = raw.get("test_cases", {})
@@ -328,7 +349,9 @@ class InMemoryGraphStore:
                         return existing
                     # Prefer non-inferred / higher confidence
                     if existing.provenance.inferred and not edge.provenance.inferred:
-                        self.edges[existing.id] = edge.model_copy(update={"id": existing.id})
+                        self.edges[existing.id] = edge.model_copy(
+                            update={"id": existing.id}
+                        )
                         self.persist()
                         return self.edges[existing.id]
                     return existing
@@ -389,7 +412,11 @@ class InMemoryGraphStore:
         project = self.projects.get(project_id, {})
         nodes = [n for n in self.nodes.values() if n.project_id == project_id]
         node_ids = {n.id for n in nodes}
-        edges = [e for e in self.edges.values() if e.source in node_ids and e.target in node_ids]
+        edges = [
+            e
+            for e in self.edges.values()
+            if e.source in node_ids and e.target in node_ids
+        ]
         return SystemFlowGraph(
             project_id=project_id,
             root_node_id=project.get("root_feature_id") or project.get("root_node_id"),
@@ -415,7 +442,9 @@ class InMemoryGraphStore:
                 self.graph_versions[graph.project_id] = versions[-20:]
 
             # Remove project nodes/edges then rewrite (user save is authoritative for flow graph)
-            existing_ids = {n.id for n in self.nodes.values() if n.project_id == graph.project_id}
+            existing_ids = {
+                n.id for n in self.nodes.values() if n.project_id == graph.project_id
+            }
             # Preserve QA artifact nodes (TestCase, Bug, Risk, etc.) not in the saved flow graph
             preserve_types = {
                 NodeType.TEST_CASE,
@@ -430,7 +459,9 @@ class InMemoryGraphStore:
             }
             for nid in list(existing_ids):
                 node = self.nodes[nid]
-                if node.type in preserve_types and nid not in {n.id for n in graph.nodes}:
+                if node.type in preserve_types and nid not in {
+                    n.id for n in graph.nodes
+                }:
                     continue
                 if nid not in {n.id for n in graph.nodes}:
                     self.delete_node(nid)
@@ -438,7 +469,9 @@ class InMemoryGraphStore:
             for node in graph.nodes:
                 node.project_id = graph.project_id
                 if not node.provenance.source_type:
-                    node.provenance = Provenance(source_type=SourceType.USER_INPUT, inferred=False)
+                    node.provenance = Provenance(
+                        source_type=SourceType.USER_INPUT, inferred=False
+                    )
                 self.nodes[node.id] = node
 
             # Replace flow edges among flow nodes
@@ -451,7 +484,9 @@ class InMemoryGraphStore:
             for edge in graph.edges:
                 self.edges[edge.id] = edge
 
-            project = self.projects.setdefault(graph.project_id, {"id": graph.project_id})
+            project = self.projects.setdefault(
+                graph.project_id, {"id": graph.project_id}
+            )
             project["root_feature_id"] = graph.root_node_id
             project["root_node_id"] = graph.root_node_id
             project["graph_version"] = graph.version + (
@@ -528,7 +563,9 @@ class InMemoryGraphStore:
                     ids + [child.id],
                     rels + [str(edge.relationship)],
                     depth + 1,
-                    failure or child.is_failure_path or child.type == NodeType.FAILURE_PATH,
+                    failure
+                    or child.is_failure_path
+                    or child.type == NodeType.FAILURE_PATH,
                     external
                     or child.is_external_dependency
                     or child.type
@@ -536,7 +573,15 @@ class InMemoryGraphStore:
                 )
 
         root = self.nodes[root_id]
-        dfs(root_id, [root.name], [root_id], [], 0, root.is_failure_path, root.is_external_dependency)
+        dfs(
+            root_id,
+            [root.name],
+            [root_id],
+            [],
+            0,
+            root.is_failure_path,
+            root.is_external_dependency,
+        )
         return paths
 
     def impact_subgraph(self, node_id: str, *, max_depth: int = 4) -> dict[str, Any]:
@@ -576,7 +621,9 @@ class InMemoryGraphStore:
 
     # --- Project / document / artifact helpers ---
 
-    def create_project(self, name: str, description: str = "", root_feature: str | None = None) -> dict[str, Any]:
+    def create_project(
+        self, name: str, description: str = "", root_feature: str | None = None
+    ) -> dict[str, Any]:
         from app.models.schemas import new_id
 
         pid = new_id("project")
@@ -589,8 +636,12 @@ class InMemoryGraphStore:
                 description=f"Root feature for {name}",
                 project_id=pid,
                 is_critical=True,
-                criticality=__import__("app.models.enums", fromlist=["Priority"]).Priority.HIGH,
-                provenance=Provenance(source_type=SourceType.USER_INPUT, inferred=False, confidence=1.0),
+                criticality=__import__(
+                    "app.models.enums", fromlist=["Priority"]
+                ).Priority.HIGH,
+                provenance=Provenance(
+                    source_type=SourceType.USER_INPUT, inferred=False, confidence=1.0
+                ),
             )
             self.nodes[root.id] = root
             root_id = root.id
@@ -642,7 +693,9 @@ class InMemoryGraphStore:
                 del self.nodes[nid]
 
             doc_ids = [
-                did for did, doc in self.documents.items() if doc.get("project_id") == project_id
+                did
+                for did, doc in self.documents.items()
+                if doc.get("project_id") == project_id
             ]
             documents_removed = len(doc_ids)
             for did in doc_ids:
@@ -651,7 +704,8 @@ class InMemoryGraphStore:
             test_keys = [
                 key
                 for key, case in self.test_cases.items()
-                if case.get("project_id") == project_id or key.startswith(f"{project_id}::")
+                if case.get("project_id") == project_id
+                or key.startswith(f"{project_id}::")
             ]
             tests_removed = len(test_keys)
             for key in test_keys:
@@ -660,7 +714,8 @@ class InMemoryGraphStore:
             bug_keys = [
                 key
                 for key, bug in self.bugs.items()
-                if bug.get("project_id") == project_id or key.startswith(f"{project_id}::")
+                if bug.get("project_id") == project_id
+                or key.startswith(f"{project_id}::")
             ]
             bugs_removed = len(bug_keys)
             for key in bug_keys:
@@ -669,7 +724,8 @@ class InMemoryGraphStore:
             review_keys = [
                 key
                 for key, review in self.test_reviews.items()
-                if review.get("project_id") == project_id or key.startswith(f"{project_id}::")
+                if review.get("project_id") == project_id
+                or key.startswith(f"{project_id}::")
             ]
             for key in review_keys:
                 del self.test_reviews[key]

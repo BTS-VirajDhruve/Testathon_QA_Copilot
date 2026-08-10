@@ -5,6 +5,12 @@ export type ClientAuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 export type UsersRouteAccess =
   | {
+      state: "loading";
+      canManage: false;
+      message: "Checking session...";
+      redirectHref: null;
+    }
+  | {
       state: "authorized";
       canManage: true;
       message: null;
@@ -30,6 +36,14 @@ export function resolveUsersRouteAccess(params: {
   search: string;
 }): UsersRouteAccess {
   const { authStatus, role, pathname, search } = params;
+  if (authStatus === "loading") {
+    return {
+      state: "loading",
+      canManage: false,
+      message: "Checking session...",
+      redirectHref: null,
+    };
+  }
   if (authStatus !== "authenticated") {
     return {
       state: "unauthenticated",

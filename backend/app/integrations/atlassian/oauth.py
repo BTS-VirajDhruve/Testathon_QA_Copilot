@@ -117,7 +117,9 @@ def exchange_code(code: str, state: str) -> dict[str, Any]:
     assert_configured()
     payload = token_store.pop_oauth_state(state)
     if not payload:
-        raise AtlassianIntegrationError(OAUTH_STATE_INVALID, "Invalid or expired OAuth state")
+        raise AtlassianIntegrationError(
+            OAUTH_STATE_INVALID, "Invalid or expired OAuth state"
+        )
     settings = get_settings()
     with httpx.Client(timeout=settings.atlassian_request_timeout_seconds) as client:
         resp = client.post(
@@ -224,7 +226,10 @@ def fetch_accessible_resources() -> list[AtlassianSite]:
         with httpx.Client(timeout=settings.atlassian_request_timeout_seconds) as client:
             resp = client.get(
                 RESOURCES_URL,
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
             )
     if resp.status_code >= 400:
         logger.warning("accessible_resources_failed", status=resp.status_code)
@@ -236,7 +241,11 @@ def fetch_accessible_resources() -> list[AtlassianSite]:
                 cloud_id=str(item.get("id") or ""),
                 name=str(item.get("name") or item.get("url") or "Atlassian site"),
                 url=str(item.get("url") or ""),
-                avatar_url=(item.get("avatarUrl") if isinstance(item.get("avatarUrl"), str) else None),
+                avatar_url=(
+                    item.get("avatarUrl")
+                    if isinstance(item.get("avatarUrl"), str)
+                    else None
+                ),
                 scopes=list(item.get("scopes") or []),
                 products=list(item.get("scopes") or []),
             )

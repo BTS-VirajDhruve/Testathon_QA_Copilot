@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -33,7 +33,7 @@ from app.models.enums import (
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_id(prefix: str = "id") -> str:
@@ -293,6 +293,7 @@ class RegressionRecommendation(BaseModel):
     recommendation_id: str = Field(default_factory=lambda: new_id("RR"))
     generation_method: str = "deterministic_fallback"
     related_bug_references: list[str] = Field(default_factory=list)
+
 
 class ImpactAnalysisResult(BaseModel):
     changed_node: str
@@ -627,7 +628,9 @@ class TestSuiteReview(BaseModel):
     suite_quality_score: float = 0.0
     obligation_coverage: list[ObligationCoverageMatch] = Field(default_factory=list)
     per_test_findings: list[TestReviewFinding] = Field(default_factory=list)
-    missing_scenario_findings: list[MissingScenarioFinding] = Field(default_factory=list)
+    missing_scenario_findings: list[MissingScenarioFinding] = Field(
+        default_factory=list
+    )
     duplicate_findings: list[TestReviewFinding] = Field(default_factory=list)
     contradiction_findings: list[TestReviewFinding] = Field(default_factory=list)
     revision_plan: RevisionPlan = Field(default_factory=RevisionPlan)
@@ -736,7 +739,9 @@ class QACopilotResponse(BaseModel):
     test_cases: list[TestCase] = Field(default_factory=list)
     exploratory_missions: list[ExploratoryMission] = Field(default_factory=list)
     bug_reports: list[BugReport] = Field(default_factory=list)
-    regression_recommendations: list[RegressionRecommendation] = Field(default_factory=list)
+    regression_recommendations: list[RegressionRecommendation] = Field(
+        default_factory=list
+    )
     impact_analysis: ImpactAnalysisResult | None = None
     coverage: CoverageGapResult | None = None
     retrieval_plan: RetrievalPlan | None = None
@@ -779,7 +784,9 @@ class QACopilotResponse(BaseModel):
     bdd_scenarios: list[BDDScenario] = Field(default_factory=list)
     generated_test_artifacts: list[GeneratedTestArtifact] = Field(default_factory=list)
     # Feature-level stories + taxonomy aggregates (additive)
-    feature_test_specifications: list[FeatureTestSpecification] = Field(default_factory=list)
+    feature_test_specifications: list[FeatureTestSpecification] = Field(
+        default_factory=list
+    )
     feature_story: UserStory | None = None
     test_classification_summary: dict[str, Any] = Field(default_factory=dict)
     category_counts: dict[str, int] = Field(default_factory=dict)

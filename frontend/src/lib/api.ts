@@ -18,6 +18,7 @@ import { publicEnv } from "./env";
 import {
   normalizeRole,
   type UserAdminCreateInput,
+  type UserInviteInput,
   type UserAdminRecord,
   type UserAdminUpdateInput,
 } from "./user-admin";
@@ -54,6 +55,12 @@ type ResetPasswordPayload = {
 
 type ChangePasswordPayload = {
   success?: boolean;
+};
+
+type InviteUserPayload = {
+  success?: boolean;
+  message?: string;
+  email?: string;
 };
 
 type UserAdminListResponse = {
@@ -454,6 +461,15 @@ export const api = {
     });
     return { success: payload?.success !== false };
   },
+  authAcceptInvite: async (body: { token: string; newPassword: string }) => {
+    const payload = await request<ResetPasswordPayload>("/api/auth/accept-invite", {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+      retryOn401: false,
+    });
+    return { success: payload?.success !== false };
+  },
   listUsers: async () => {
     const payload = await requestFirstAvailable<unknown>([
       "/api/users",
@@ -481,6 +497,30 @@ export const api = {
       throw new ApiError("Invalid user create response payload.", 500);
     }
     return record;
+  },
+  inviteUser: async (body: UserInviteInput) => {
+    const payload = await requestFirstAvailable<InviteUserPayload>(
+      ["/api/users/invite", "/api/auth/users/invite"],
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: body.name,
+          email: body.email,
+          role: body.role,
+        }),
+      }
+    );
+    return {
+      success: payload?.success !== false,
+      message:
+        typeof payload?.message === "string" && payload.message.trim()
+          ? payload.message
+          : "Invitation email sent successfully.",
+      email:
+        typeof payload?.email === "string" && payload.email.trim()
+          ? payload.email.trim().toLowerCase()
+          : body.email.trim().toLowerCase(),
+    };
   },
   updateUser: async (userId: string, body: UserAdminUpdateInput) => {
     const payload = await requestFirstAvailable<unknown>(

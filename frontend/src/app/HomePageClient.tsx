@@ -48,6 +48,7 @@ import { KnowledgePanel } from "@/components/KnowledgePanel";
 import { AnalysisResultsPanel } from "@/components/AnalysisResultsPanel";
 import { HomePanel } from "@/components/HomePanel";
 import { PageHeader } from "@/components/PageHeader";
+import { AuthSessionShimmer } from "@/components/AuthSessionShimmer";
 
 const NAV_ICONS = {
   home: Home,
@@ -294,7 +295,7 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
   }, [refreshProjects, selectProject]);
 
   useEffect(() => {
-    if (authStatus === "authenticated") return;
+    if (authStatus !== "unauthenticated") return;
     if (typeof window === "undefined") return;
     const href = buildLoginHref(pathname, window.location.search);
     router.replace(href);
@@ -308,6 +309,10 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
     };
   }, [authStatus, connect]);
+
+  if (authStatus === "loading") {
+    return <AuthSessionShimmer />;
+  }
 
   if (authStatus !== "authenticated") {
     return (

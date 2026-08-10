@@ -37,7 +37,9 @@ def _path_compatible(obligation_path: list[str], test_path: list[str]) -> bool:
     return False
 
 
-def _behavior_compatible(obligation: CoverageObligation, test: TestCase) -> tuple[bool, list[str], list[str]]:
+def _behavior_compatible(
+    obligation: CoverageObligation, test: TestCase
+) -> tuple[bool, list[str], list[str]]:
     reasons: list[str] = []
     missing: list[str] = []
     otype = obligation.obligation_type
@@ -59,10 +61,16 @@ def _behavior_compatible(obligation: CoverageObligation, test: TestCase) -> tupl
         else:
             missing.append(label)
 
-    if otype in (ObligationType.NEGATIVE_FLOW, ObligationType.VALIDATION) and "negative" in cat:
+    if (
+        otype in (ObligationType.NEGATIVE_FLOW, ObligationType.VALIDATION)
+        and "negative" in cat
+    ):
         reasons.append("negative_category")
     if otype == ObligationType.FAILURE_PATH:
-        need(["fail", "error", "timeout", "invalid", "reject", "denied"], "failure_behavior")
+        need(
+            ["fail", "error", "timeout", "invalid", "reject", "denied"],
+            "failure_behavior",
+        )
     if otype == ObligationType.RECOVERY:
         need(["recover", "retry", "resume", "fallback", "restore"], "recovery_behavior")
     if otype == ObligationType.HISTORICAL_BUG_REGRESSION:
@@ -77,18 +85,49 @@ def _behavior_compatible(obligation: CoverageObligation, test: TestCase) -> tupl
                 else:
                     missing.append("bug_reference")
     if otype == ObligationType.SECURITY:
-        need(["auth", "permission", "role", "token", "security", "unauthorized", "forbidden"], "security_behavior")
+        need(
+            [
+                "auth",
+                "permission",
+                "role",
+                "token",
+                "security",
+                "unauthorized",
+                "forbidden",
+            ],
+            "security_behavior",
+        )
     if otype == ObligationType.ROLE_PERMISSION:
-        need(["role", "permission", "authorize", "access", "denied", "allowed"], "role_behavior")
+        need(
+            ["role", "permission", "authorize", "access", "denied", "allowed"],
+            "role_behavior",
+        )
         if obligation.role and obligation.role.lower() in blob:
             reasons.append("role_named")
     if otype == ObligationType.BOUNDARY:
-        need(["boundary", "min", "max", "edge", "limit", "length", "empty"], "boundary_behavior")
+        need(
+            ["boundary", "min", "max", "edge", "limit", "length", "empty"],
+            "boundary_behavior",
+        )
     if otype == ObligationType.STATE_TRANSITION:
         need(["state", "transition", "status", "move"], "state_behavior")
     if otype == ObligationType.EXTERNAL_DEPENDENCY:
-        need(["timeout", "unavailable", "dependency", "provider", "external", "fallback"], "dependency_failure")
-    if otype in (ObligationType.POSITIVE_FLOW, ObligationType.GRAPH_PATH, ObligationType.ALTERNATE_FLOW):
+        need(
+            [
+                "timeout",
+                "unavailable",
+                "dependency",
+                "provider",
+                "external",
+                "fallback",
+            ],
+            "dependency_failure",
+        )
+    if otype in (
+        ObligationType.POSITIVE_FLOW,
+        ObligationType.GRAPH_PATH,
+        ObligationType.ALTERNATE_FLOW,
+    ):
         if test.expected_result and len(test.expected_result.strip()) > 8:
             reasons.append("observable_outcome")
         else:
@@ -114,9 +153,18 @@ def _behavior_compatible(obligation: CoverageObligation, test: TestCase) -> tupl
     else:
         reasons.append("has_steps")
 
-    covered_signal = len(reasons) >= 2 and "expected_result" not in missing and "steps" not in missing
+    covered_signal = (
+        len(reasons) >= 2
+        and "expected_result" not in missing
+        and "steps" not in missing
+    )
     # Type-specific: if we required a behavior label and it's missing, fail
-    type_missing = [m for m in missing if m.endswith("_behavior") or m in ("bug_reference", "requirement_link", "role_named")]
+    type_missing = [
+        m
+        for m in missing
+        if m.endswith("_behavior")
+        or m in ("bug_reference", "requirement_link", "role_named")
+    ]
     if type_missing and otype not in (
         ObligationType.POSITIVE_FLOW,
         ObligationType.GRAPH_PATH,
@@ -147,7 +195,11 @@ def match_test_to_obligation(
             missing_elements=["retired_test"],
         )
 
-    if test.project_id and obligation.project_id and test.project_id != obligation.project_id:
+    if (
+        test.project_id
+        and obligation.project_id
+        and test.project_id != obligation.project_id
+    ):
         return ObligationCoverageMatch(
             obligation_id=obligation.obligation_id,
             test_case_id=test.test_case_id,
@@ -214,7 +266,11 @@ def match_test_to_obligation(
     # Positive path may pass with path + steps + expected even without type keyword
     if (
         obligation.obligation_type
-        in (ObligationType.POSITIVE_FLOW, ObligationType.GRAPH_PATH, ObligationType.ALTERNATE_FLOW)
+        in (
+            ObligationType.POSITIVE_FLOW,
+            ObligationType.GRAPH_PATH,
+            ObligationType.ALTERNATE_FLOW,
+        )
         and "compatible_graph_path" in reasons
         and "has_expected_result" in reasons
         and "has_steps" in reasons
@@ -253,7 +309,11 @@ def evaluate_obligation_coverage(
 
     for obl in obligations:
         if obl.status == ObligationStatus.INSUFFICIENT_EVIDENCE:
-            updated.append(obl.model_copy(update={"covered_by_test_ids": [], "coverage_reason": None}))
+            updated.append(
+                obl.model_copy(
+                    update={"covered_by_test_ids": [], "coverage_reason": None}
+                )
+            )
             continue
         covering: list[str] = []
         best_reason = None
@@ -276,7 +336,11 @@ def evaluate_obligation_coverage(
             )
         )
 
-    mandatory = [o for o in updated if o.mandatory and o.status != ObligationStatus.INSUFFICIENT_EVIDENCE]
+    mandatory = [
+        o
+        for o in updated
+        if o.mandatory and o.status != ObligationStatus.INSUFFICIENT_EVIDENCE
+    ]
     covered = [o for o in mandatory if o.status == ObligationStatus.COVERED]
     pct = round(100.0 * len(covered) / len(mandatory), 2) if mandatory else 100.0
     return updated, matches, pct

@@ -2,17 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 import pytest
+from app.api.auth_dependencies import (
+    _extract_bearer_token,
+    _is_public_endpoint,
+    _normalize_path,
+)
+from app.models.auth import UserPublic, UserUpdateInput
+from app.services.security import (
+    hash_password,
+    hash_token,
+    safe_compare,
+    verify_password,
+)
+from app.services.user_service import get_user_service
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from app.api.auth_dependencies import _extract_bearer_token, _is_public_endpoint, _normalize_path
-from app.models.auth import UserPublic, UserUpdateInput
-from app.services.security import hash_password, hash_token, safe_compare, verify_password
-from app.services.user_service import get_user_service
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 def _make_request(*, authorization: str | None = None) -> Request:
@@ -69,6 +82,7 @@ def test_public_endpoint_allowlist_handles_path_normalization() -> None:
     assert _is_public_endpoint("GET", "/api/health/")
     assert _is_public_endpoint("post", "/api/auth/forgot-password/")
     assert _is_public_endpoint("POST", "/api/auth/reset-password")
+    assert _is_public_endpoint("POST", "/api/auth/accept-invite")
     assert _is_public_endpoint("GET", "/api/projects") is False
 
 
@@ -103,9 +117,9 @@ def test_protected_route_rejects_inactive_or_deleted_users_after_login(
     tokens = login_and_get_tokens(email=user.email, password="SecurePass123!")
     service = get_user_service()
     if state_change == "inactive":
-        service.update_user(user.id, UserUpdateInput(isActive=False))
+        _run(service.update_user(user.id, UserUpdateInput(isActive=False)))
     else:
-        service.soft_delete_user(user.id)
+        _run(service.soft_delete_user(user.id))
 
     response = auth_client.get(
         "/api/projects",
@@ -126,9 +140,9 @@ def test_refresh_token_rejected_after_user_is_deactivated_or_deleted(
     tokens = login_and_get_tokens(email=user.email, password="SecurePass123!")
     service = get_user_service()
     if state_change == "inactive":
-        service.update_user(user.id, UserUpdateInput(isActive=False))
+        _run(service.update_user(user.id, UserUpdateInput(isActive=False)))
     else:
-        service.soft_delete_user(user.id)
+        _run(service.soft_delete_user(user.id))
 
     refreshed = auth_client.post(
         "/api/auth/refresh",

@@ -5,16 +5,17 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
+from app.integrations.atlassian import oauth, token_store
 from app.integrations.atlassian.adf import adf_to_text
 from app.integrations.atlassian.crypto import decrypt_secret, encrypt_secret
-from app.integrations.atlassian.errors import AtlassianIntegrationError, OAUTH_STATE_INVALID
+from app.integrations.atlassian.errors import (
+    OAUTH_STATE_INVALID,
+    AtlassianIntegrationError,
+)
 from app.integrations.atlassian.html_sanitize import html_to_text
-from app.integrations.atlassian.jql import build_issue_jql, escape_jql_string
-from app.integrations.atlassian import oauth, token_store
 from app.integrations.atlassian.import_service import import_sources, remove_source
+from app.integrations.atlassian.jql import build_issue_jql, escape_jql_string
 from app.integrations.atlassian.schemas import AtlassianImportRequest, ImportSourceItem
-from app.models.schemas import new_id
 
 
 def test_encrypt_decrypt_roundtrip(monkeypatch):
@@ -176,9 +177,18 @@ def test_import_idempotent(monkeypatch, tmp_path):
     )
 
     with (
-        patch("app.integrations.atlassian.import_service.require_selected_cloud_id", return_value="cloud-1"),
-        patch("app.integrations.atlassian.import_service.get_jira_adapter", return_value=fake_jira),
-        patch("app.integrations.atlassian.import_service.get_confluence_adapter", return_value=MagicMock()),
+        patch(
+            "app.integrations.atlassian.import_service.require_selected_cloud_id",
+            return_value="cloud-1",
+        ),
+        patch(
+            "app.integrations.atlassian.import_service.get_jira_adapter",
+            return_value=fake_jira,
+        ),
+        patch(
+            "app.integrations.atlassian.import_service.get_confluence_adapter",
+            return_value=MagicMock(),
+        ),
     ):
         req = AtlassianImportRequest(
             qa_project_id=pid,
@@ -205,9 +215,9 @@ def test_project_isolation_for_imports(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("GRAPH_STORE_PATH", str(tmp_path / "graph2.json"))
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma2"))
-    from app.core.config import get_settings
     import app.graph.store as store_mod
     import app.rag.vector_store as vs_mod
+    from app.core.config import get_settings
     from app.graph.store import get_graph_store
     from app.integrations.atlassian import source_store
 
@@ -236,17 +246,35 @@ def test_project_isolation_for_imports(monkeypatch, tmp_path):
         extra_fields = {}
 
     fake_jira = MagicMock()
-    fake_jira.normalize_issue.return_value = ("# AAA-1\nError message returned", FakePreview())
+    fake_jira.normalize_issue.return_value = (
+        "# AAA-1\nError message returned",
+        FakePreview(),
+    )
 
     with (
-        patch("app.integrations.atlassian.import_service.require_selected_cloud_id", return_value="cloud-1"),
-        patch("app.integrations.atlassian.import_service.get_jira_adapter", return_value=fake_jira),
-        patch("app.integrations.atlassian.import_service.get_confluence_adapter", return_value=MagicMock()),
+        patch(
+            "app.integrations.atlassian.import_service.require_selected_cloud_id",
+            return_value="cloud-1",
+        ),
+        patch(
+            "app.integrations.atlassian.import_service.get_jira_adapter",
+            return_value=fake_jira,
+        ),
+        patch(
+            "app.integrations.atlassian.import_service.get_confluence_adapter",
+            return_value=MagicMock(),
+        ),
     ):
         import_sources(
             AtlassianImportRequest(
                 qa_project_id=a["id"],
-                sources=[ImportSourceItem(source_type="jira_issue", external_id="200", external_key="AAA-1")],
+                sources=[
+                    ImportSourceItem(
+                        source_type="jira_issue",
+                        external_id="200",
+                        external_key="AAA-1",
+                    )
+                ],
             )
         )
     assert len(source_store.list_sources(a["id"])) == 1

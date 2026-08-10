@@ -7,11 +7,19 @@ import json
 import zipfile
 
 import pytest
-from fastapi.testclient import TestClient
-
-from app.agents.bdd import convert_test_to_bdd, escape_table_cell, render_feature_file, validate_bdd_scenario
-from app.agents.bdd_export import BDDExportRequest, build_export_package, build_export_preview
+from app.agents.bdd import (
+    convert_test_to_bdd,
+    escape_table_cell,
+    render_feature_file,
+    validate_bdd_scenario,
+)
+from app.agents.bdd_export import (
+    BDDExportRequest,
+    build_export_package,
+    build_export_preview,
+)
 from app.models.schemas import BDDScenario, BDDStep, TestCase
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -47,10 +55,8 @@ def _isolate_store(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def client():
-    from app.main import create_app
-
-    return TestClient(create_app())
+def client(authenticated_client: TestClient):
+    return authenticated_client
 
 
 def _seed_analysis(client, *, fmt: str = "standard", name: str = "Export Project"):
@@ -128,7 +134,8 @@ def test_render_feature_file_one_feature_and_comments():
     assert "Scenario: Complete checkout with valid card" in body
     # Cucumber-valid: tags appear on the line before Scenario
     assert "@priority-high @regression @automation-yes\n  Scenario:" in body or (
-        "@priority-high" in body and body.index("@priority-high") < body.index("Scenario:")
+        "@priority-high" in body
+        and body.index("@priority-high") < body.index("Scenario:")
     )
     assert "# Test ID: TC-1" in body
     assert "# Graph Path: Checkout > Payment" in body
@@ -152,7 +159,9 @@ def test_journey_style_tags_and_section():
     assert "@priority-high" in tags
     assert "@regression" in tags
     assert "@automation-yes" in tags
-    scenario, status, _ = convert_test_to_bdd(tc, feature_name="Journey Editor [ECT-83]")
+    scenario, status, _ = convert_test_to_bdd(
+        tc, feature_name="Journey Editor [ECT-83]"
+    )
     assert status == "ok"
     assert scenario is not None
     assert scenario.rule == "NEGATIVE"
@@ -176,16 +185,18 @@ def test_single_feature_export_endpoint(client):
     assert res.status_code == 200, res.text
     assert "attachment" in res.headers.get("content-disposition", "")
     assert "csv" in (res.headers.get("content-type") or "").lower()
-    assert res.headers.get("content-disposition", "").endswith('.csv"') or ".csv" in res.headers.get(
-        "content-disposition", ""
-    )
+    assert res.headers.get("content-disposition", "").endswith(
+        '.csv"'
+    ) or ".csv" in res.headers.get("content-disposition", "")
     body = res.content.decode("utf-8")
     assert "scenario_name" in body
     assert "Given|" in body or "When|" in body
 
 
 def test_feature_export_when_csv_disabled(client):
-    project_id, analysis = _seed_analysis(client, fmt="standard", name="Feature Only Export")
+    project_id, analysis = _seed_analysis(
+        client, fmt="standard", name="Feature Only Export"
+    )
     assert analysis["test_cases"]
     res = client.post(
         f"/api/projects/{project_id}/analyses/latest/exports/bdd",
@@ -216,10 +227,14 @@ def test_preview_endpoint(client):
 
 
 def test_both_mode_exports_once(client):
-    project_id, analysis = _seed_analysis(client, fmt="both", name="Both Export Project")
+    project_id, analysis = _seed_analysis(
+        client, fmt="both", name="Both Export Project"
+    )
     logical = len(analysis.get("generated_test_artifacts") or analysis["test_cases"])
     preview = build_export_preview(project_id, BDDExportRequest(strict=True))
-    assert preview.scenario_count == logical or preview.scenario_count == len(analysis["test_cases"])
+    assert preview.scenario_count == logical or preview.scenario_count == len(
+        analysis["test_cases"]
+    )
     # One scenario per logical test id
     ids = [s for f in preview.files for s in f.logical_test_ids]
     assert len(ids) == len(set(ids))
@@ -287,8 +302,15 @@ def test_valid_only_export_excludes_invalid(client):
         BDDExportRequest(scope="valid_only", strict=False, include_import_csv=False),
     )
     assert package.preview.scenario_count == 1
-    assert any(e.test_id == bad.test_case_id for e in package.preview.excluded_tests) or package.preview.scenario_count == 1
-    text = package.content.decode("utf-8") if isinstance(package.content, (bytes, bytearray)) else ""
+    assert (
+        any(e.test_id == bad.test_case_id for e in package.preview.excluded_tests)
+        or package.preview.scenario_count == 1
+    )
+    text = (
+        package.content.decode("utf-8")
+        if isinstance(package.content, (bytes, bytearray))
+        else ""
+    )
     if text:
         assert "Accept valid payment" in text
         assert "Vague outcome" not in text
@@ -314,7 +336,9 @@ def test_form_import_csv_in_zip(client):
                     keyword="Then",
                     text="the journey is created and listed in the journey library",
                 ),
-                BDDStep(keyword="And", text="all entered details are persisted on reload"),
+                BDDStep(
+                    keyword="And", text="all entered details are persisted on reload"
+                ),
             ],
             graph_path=["Helix Studio", "Journey Editor"],
             source_test_id="TC-JE-001",
@@ -325,7 +349,10 @@ def test_form_import_csv_in_zip(client):
             tags=["priority-high", "regression", "automation-yes"],
             steps=[
                 BDDStep(keyword="Given", text="the admin is creating a new journey"),
-                BDDStep(keyword="When", text="they leave the name field empty and click Save"),
+                BDDStep(
+                    keyword="When",
+                    text="they leave the name field empty and click Save",
+                ),
                 BDDStep(
                     keyword="Then",
                     text="the system displays a validation error indicating name is required",
@@ -355,16 +382,24 @@ def test_form_import_csv_in_zip(client):
     assert "Given,the admin is in Helix Studio" in steps_csv
 
     project_id, _ = _seed_analysis(client, name="CSV Export Project")
-    preview = build_export_preview(project_id, BDDExportRequest(strict=True, include_import_csv=True))
+    preview = build_export_preview(
+        project_id, BDDExportRequest(strict=True, include_import_csv=True)
+    )
     assert preview.csv_preview
     assert preview.steps_csv
     assert "scenario_name" in preview.csv_preview
     assert "feature_description" in preview.csv_preview
     assert "section" in preview.csv_preview
     assert "Given|" in preview.csv_preview or "When|" in preview.csv_preview
-    assert "priority-high" in preview.csv_preview or "priority-medium" in preview.csv_preview or "priority-critical" in preview.csv_preview
+    assert (
+        "priority-high" in preview.csv_preview
+        or "priority-medium" in preview.csv_preview
+        or "priority-critical" in preview.csv_preview
+    )
 
-    package = build_export_package(project_id, BDDExportRequest(strict=True, include_import_csv=True))
+    package = build_export_package(
+        project_id, BDDExportRequest(strict=True, include_import_csv=True)
+    )
     assert package.content_type.startswith("text/csv")
     assert package.filename.endswith(".csv")
     cases = package.content.decode("utf-8")
@@ -373,7 +408,9 @@ def test_form_import_csv_in_zip(client):
 
 
 def test_no_tests_typed_error(client):
-    created = client.post("/api/projects", json={"name": "Empty Export", "root_feature": "X"})
+    created = client.post(
+        "/api/projects", json={"name": "Empty Export", "root_feature": "X"}
+    )
     project_id = created.json()["id"]
     res = client.post(
         f"/api/projects/{project_id}/analyses/latest/exports/bdd",
@@ -432,7 +469,9 @@ def test_zip_when_multiple_features(client):
         ).model_dump(mode="json")
     )
     store.set_latest_analysis(project_id, analysis)
-    package = build_export_package(project_id, BDDExportRequest(strict=True, include_import_csv=False))
+    package = build_export_package(
+        project_id, BDDExportRequest(strict=True, include_import_csv=False)
+    )
     if package.content_type == "application/zip":
         with zipfile.ZipFile(io.BytesIO(package.content)) as zf:
             names = zf.namelist()

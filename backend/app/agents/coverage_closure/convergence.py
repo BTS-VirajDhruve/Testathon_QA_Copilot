@@ -30,7 +30,7 @@ class RefinementLimits:
         cls,
         *,
         max_iterations_override: int | None = None,
-    ) -> "RefinementLimits":
+    ) -> RefinementLimits:
         s = get_settings()
         return cls(
             max_iterations=max(
@@ -50,7 +50,9 @@ class RefinementLimits:
             max_llm_calls=max(0, int(s.test_refinement_max_llm_calls)),
             require_all_mandatory=bool(s.test_refinement_require_all_mandatory),
             require_zero_invalid=bool(s.test_refinement_require_zero_invalid),
-            require_zero_needs_revision=bool(s.test_refinement_require_zero_needs_revision),
+            require_zero_needs_revision=bool(
+                s.test_refinement_require_zero_needs_revision
+            ),
         )
 
 
@@ -127,7 +129,10 @@ class ConvergenceController:
                 and recent[i].needs_revision_count >= recent[i - 1].needs_revision_count
                 for i in range(1, len(recent))
             )
-            if all(imp < self.limits.min_improvement_percent for imp in improvements) and invalid_flat:
+            if (
+                all(imp < self.limits.min_improvement_percent for imp in improvements)
+                and invalid_flat
+            ):
                 return True, ConvergenceStatus.STAGNATED, "no_measurable_improvement"
 
         # Same blocking finding signatures repeating
@@ -172,9 +177,7 @@ class ConvergenceController:
         ]
         covered = [o for o in mandatory if o.status == ObligationStatus.COVERED]
         remaining = [
-            o.obligation_id
-            for o in mandatory
-            if o.status != ObligationStatus.COVERED
+            o.obligation_id for o in mandatory if o.status != ObligationStatus.COVERED
         ]
         return ConvergenceReport(
             status=status,

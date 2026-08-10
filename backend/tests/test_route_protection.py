@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
-
-from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.models.auth import RoleType, UserCreateInput
 from app.services.user_service import get_user_service
+from fastapi.testclient import TestClient
 
 
-def _create_user(email: str, role: RoleType = "qa", password: str = "SecurePass123!") -> None:
-    get_user_service().create_user(
-        UserCreateInput(
-            name=f"{role.title()} User",
-            email=email,
-            password=password,
-            role=role,
-            isActive=True,
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _create_user(
+    email: str, role: RoleType = "qa", password: str = "SecurePass123!"
+) -> None:
+    _run(
+        get_user_service().create_user(
+            UserCreateInput(
+                name=f"{role.title()} User",
+                email=email,
+                password=password,
+                role=role,
+                isActive=True,
+            )
         )
     )
 
@@ -86,14 +94,27 @@ def test_public_endpoint_allowlist_remains_unauthenticated() -> None:
     assert health.status_code == 200
 
     # Logout stays public because it revokes refresh token from request body.
-    logout = client.post("/api/auth/logout", json={"refreshToken": "invalid-refresh-token-value-12345"})
+    logout = client.post(
+        "/api/auth/logout", json={"refreshToken": "invalid-refresh-token-value-12345"}
+    )
     assert logout.status_code == 200
     assert logout.json()["success"] is True
 
     forgot = client.post("/api/auth/forgot-password", json={"email": "qa@example.com"})
     reset = client.post(
         "/api/auth/reset-password",
-        json={"token": "placeholder-token-value-12345", "newPassword": "SecurePass123!"},
+        json={
+            "token": "placeholder-token-value-12345",
+            "newPassword": "SecurePass123!",
+        },
+    )
+    accept_invite = client.post(
+        "/api/auth/accept-invite",
+        json={
+            "token": "placeholder-token-value-12345",
+            "newPassword": "SecurePass123!",
+        },
     )
     assert forgot.status_code != 401
     assert reset.status_code != 401
+    assert accept_invite.status_code != 401

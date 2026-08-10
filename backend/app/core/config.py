@@ -12,7 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=(str(BACKEND_ROOT / ".env"), ".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_host: str = "localhost"
     api_port: int = 8000
+    uvicorn_reload: bool = True
+    uvicorn_workers: int = 1
+    uvicorn_log_level: str = "info"
+    uvicorn_proxy_headers: bool = True
+    uvicorn_forwarded_allow_ips: str = "*"
+    uvicorn_timeout_keep_alive_seconds: int = 10
+    uvicorn_timeout_graceful_shutdown_seconds: int = 30
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     log_level: str = "INFO"
 
@@ -118,6 +125,17 @@ class Settings(BaseSettings):
     jwt_access_token_minutes: int = 30
     jwt_refresh_token_days: int = 14
     forgot_password_token_expire_minutes: int = 30
+    invite_token_expire_minutes: int = 1440
+
+    # Frontend link base (for auth emails)
+    frontend_base_url: str = "http://localhost:3000"
+
+    # AWS SES
+    aws_region: str = "us-east-1"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_ses_from_email: str = ""
+    aws_ses_from_name: str = "QA Copilot"
 
     # Relative paths resolve against BACKEND_ROOT (not process cwd).
     data_dir: str = "./data"
@@ -141,6 +159,21 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
+    def is_development(self) -> bool:
+        return self.app_env.strip().lower() == "development"
+
+    @property
+    def effective_uvicorn_reload(self) -> bool:
+        return self.is_development and self.uvicorn_reload
+
+    @property
+    def effective_uvicorn_workers(self) -> int:
+        # Uvicorn cannot run multiple workers with auto-reload enabled.
+        if self.effective_uvicorn_reload:
+            return 1
+        return max(1, self.uvicorn_workers)
+
+    @property
     def has_openai(self) -> bool:
         return bool(self.openai_api_key and self.openai_api_key.strip())
 
@@ -162,6 +195,30 @@ class Settings(BaseSettings):
     @property
     def atlassian_data_dir(self) -> Path:
         return Path(self.data_dir) / "atlassian"
+
+    @model_validator(mode="after")
+    def _validate_runtime_hardening(self) -> "Settings":
+        insecure_secrets = {
+            "change-me-access-secret",
+            "change-me-refresh-secret",
+            "",
+        }
+        if self.mongo_required and not self.mongo_enabled:
+            raise ValueError("mongo_required=true requires mongo_enabled=true")
+        if not self.is_development:
+            if self.jwt_access_secret.strip() in insecure_secrets:
+                raise ValueError(
+                    "jwt_access_secret must be set to a secure value outside development",
+                )
+            if self.jwt_refresh_secret.strip() in insecure_secrets:
+                raise ValueError(
+                    "jwt_refresh_secret must be set to a secure value outside development",
+                )
+            if "*" in self.cors_origin_list:
+                raise ValueError(
+                    "Wildcard CORS origin is not allowed outside development"
+                )
+        return self
 
     def ensure_dirs(self) -> None:
         Path(self.data_dir).mkdir(parents=True, exist_ok=True)

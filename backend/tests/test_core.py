@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from app.models.auth import UserCreateInput
 from app.services.user_service import get_user_service
+from fastapi.testclient import TestClient
 
 # Isolate test store
 TEST_DATA = Path("/tmp/qa_copilot_test_data")
 TEST_DATA.mkdir(parents=True, exist_ok=True)
+
+
+def _run(coro):
+    return asyncio.run(coro)
 
 
 @pytest.fixture(autouse=True)
@@ -56,16 +60,20 @@ def client():
     app_client = TestClient(create_app())
     email = f"admin-{uuid4().hex[:8]}@example.com"
     password = "SecurePass123!"
-    get_user_service().create_user(
-        UserCreateInput(
-            name="Core Test Admin",
-            email=email,
-            password=password,
-            role="admin",
-            isActive=True,
+    _run(
+        get_user_service().create_user(
+            UserCreateInput(
+                name="Core Test Admin",
+                email=email,
+                password=password,
+                role="admin",
+                isActive=True,
+            )
         )
     )
-    login = app_client.post("/api/auth/login", json={"email": email, "password": password})
+    login = app_client.post(
+        "/api/auth/login", json={"email": email, "password": password}
+    )
     assert login.status_code == 200
     token = login.json()["accessToken"]
     app_client.headers.update({"Authorization": f"Bearer {token}"})
@@ -161,7 +169,9 @@ def test_impact_and_regression(client):
 
 
 def test_nl_to_graph_marks_inferred(client):
-    proj = client.post("/api/projects", json={"name": "NL", "root_feature": "Sign In"}).json()
+    proj = client.post(
+        "/api/projects", json={"name": "NL", "root_feature": "Sign In"}
+    ).json()
     graph = client.post(
         f"/api/projects/{proj['id']}/flow/from-text",
         json={
@@ -171,11 +181,14 @@ def test_nl_to_graph_marks_inferred(client):
             )
         },
     ).json()
-    assert any("Sign" in n["name"] or "sign" in n["name"].lower() for n in graph["nodes"])
+    assert any(
+        "Sign" in n["name"] or "sign" in n["name"].lower() for n in graph["nodes"]
+    )
     assert len(graph["nodes"]) >= 3
     # Provenance always present; inferred=true only when classifier used LLM / low confidence
     assert all(n.get("provenance") for n in graph["nodes"])
     assert graph["root_node_id"]
+
 
 def test_document_ingest_idempotent(client):
     seed = client.post("/api/demo/seed").json()
@@ -209,7 +222,10 @@ def test_coverage_engine_explains_calculation():
             "root": "Sign In",
             "branches": [
                 {"name": "Email + Password", "children": ["MFA"]},
-                {"name": "Enterprise SSO", "children": [{"name": "IdP Failure", "is_failure_path": True}]},
+                {
+                    "name": "Enterprise SSO",
+                    "children": [{"name": "IdP Failure", "is_failure_path": True}],
+                },
             ],
         },
     )

@@ -14,7 +14,6 @@ from app.models.enums import TestOutputFormat
 from app.models.schemas import (
     BDDScenario,
     BDDStep,
-    EvidenceReference,
     GeneratedTestArtifact,
     TestCase,
     new_id,
@@ -43,7 +42,11 @@ def slug_tag(value: str) -> str:
 
 def scenario_section(category: str | None) -> str:
     """Map legacy category string to section comment."""
-    from app.agents.taxonomy import infer_behaviors, infer_nature, section_for_classification
+    from app.agents.taxonomy import (
+        infer_behaviors,
+        infer_nature,
+        section_for_classification,
+    )
     from app.models.schemas import TestClassification
 
     cls = TestClassification(
@@ -73,7 +76,9 @@ def build_tags(tc: TestCase, *, automation: str | None = None) -> list[str]:
     assert cls is not None
     if automation:
         cls = cls.model_copy(
-            update={"execution_status": execution_from_automation_suitability(automation)}
+            update={
+                "execution_status": execution_from_automation_suitability(automation)
+            }
         )
     return build_normalized_tags(cls)
 
@@ -94,25 +99,33 @@ def render_gherkin(
     lines: list[str] = []
     if include_feature:
         title = scenario.feature
-        if scenario.feature_reference and f"[{scenario.feature_reference}]" not in title:
+        if (
+            scenario.feature_reference
+            and f"[{scenario.feature_reference}]" not in title
+        ):
             title = f"{scenario.feature} [{scenario.feature_reference}]"
         lines.append(f"Feature: {title}")
-        description = scenario.feature_description or build_feature_description(scenario.feature)
+        description = scenario.feature_description or build_feature_description(
+            scenario.feature
+        )
         for raw_line in str(description).splitlines():
             text = raw_line.strip()
             if text:
                 lines.append(f"  {text}")
         lines.append("")
         section = (
-            (scenario.section or scenario.rule or "").strip().upper()
-            or scenario_section(scenario.test_type)
-        )
+            scenario.section or scenario.rule or ""
+        ).strip().upper() or scenario_section(scenario.test_type)
         if section:
             lines.append(f"  # {section}")
             lines.append("")
     if include_traceability_comments:
         lines.extend(_traceability_comment_lines(scenario, indent="  "))
-    keyword = "Scenario Outline" if scenario.scenario_type == "scenario_outline" else "Scenario"
+    keyword = (
+        "Scenario Outline"
+        if scenario.scenario_type == "scenario_outline"
+        else "Scenario"
+    )
     if tags_before_scenario and scenario.tags:
         lines.append("  " + " ".join(scenario.tags))
     lines.append(f"  {keyword}: {scenario.scenario_name}")
@@ -126,7 +139,9 @@ def render_gherkin(
     if scenario.scenario_type == "scenario_outline" and scenario.examples:
         lines.append("    Examples:")
         headers = list(scenario.examples[0].keys())
-        lines.append("      | " + " | ".join(escape_table_cell(h) for h in headers) + " |")
+        lines.append(
+            "      | " + " | ".join(escape_table_cell(h) for h in headers) + " |"
+        )
         for row in scenario.examples:
             lines.append(
                 "      | "
@@ -141,7 +156,9 @@ def render_gherkin_ui(scenario: BDDScenario, **kwargs: Any) -> str:
     return render_gherkin(scenario, tags_before_scenario=False, **kwargs)
 
 
-def _traceability_comment_lines(scenario: BDDScenario, *, indent: str = "  ") -> list[str]:
+def _traceability_comment_lines(
+    scenario: BDDScenario, *, indent: str = "  "
+) -> list[str]:
     comments: list[str] = []
     if scenario.source_test_id:
         comments.append(f"{indent}# Test ID: {scenario.source_test_id}")
@@ -180,7 +197,9 @@ def render_feature_file(
     ref = next((s.feature_reference for s in scenarios if s.feature_reference), None)
     if ref and f"[{ref}]" not in feature:
         feature = f"{feature} [{ref}]"
-    description = next((s.feature_description for s in scenarios if s.feature_description), None)
+    description = next(
+        (s.feature_description for s in scenarios if s.feature_description), None
+    )
     if not description:
         description = build_feature_description(feature)
 
@@ -205,7 +224,9 @@ def render_feature_file(
                 lines.append(f"  {text}")
     lines.append("")
 
-    backgrounds = [tuple((s.keyword, s.text) for s in sc.background) for sc in scenarios]
+    backgrounds = [
+        tuple((s.keyword, s.text) for s in sc.background) for sc in scenarios
+    ]
     shared_bg = (
         backgrounds[0]
         if backgrounds and all(b == backgrounds[0] and b for b in backgrounds)
@@ -260,12 +281,16 @@ def render_feature_file(
                 lines.append("    Examples:")
                 headers = list(scenario.examples[0].keys())
                 lines.append(
-                    "      | " + " | ".join(escape_table_cell(h) for h in headers) + " |"
+                    "      | "
+                    + " | ".join(escape_table_cell(h) for h in headers)
+                    + " |"
                 )
                 for row in scenario.examples:
                     lines.append(
                         "      | "
-                        + " | ".join(escape_table_cell(str(row.get(h, ""))) for h in headers)
+                        + " | ".join(
+                            escape_table_cell(str(row.get(h, ""))) for h in headers
+                        )
                         + " |"
                     )
             lines.append("")
@@ -317,7 +342,9 @@ def validate_bdd_scenario(
             missing = placeholders - headers
             unused = headers - placeholders
             if missing:
-                issues.append(f"example_headers_missing_placeholders:{','.join(sorted(missing))}")
+                issues.append(
+                    f"example_headers_missing_placeholders:{','.join(sorted(missing))}"
+                )
             if unused and not placeholders:
                 issues.append("examples_without_placeholders")
     elif scenario.examples and not placeholders:
@@ -340,7 +367,9 @@ def validate_bdd_scenario(
 
     # Lightweight parseability check: Feature/Scenario + indented steps
     gherkin = scenario.gherkin_text or render_gherkin(scenario)
-    if "Feature:" not in gherkin or ("Scenario:" not in gherkin and "Scenario Outline:" not in gherkin):
+    if "Feature:" not in gherkin or (
+        "Scenario:" not in gherkin and "Scenario Outline:" not in gherkin
+    ):
         issues.append("unparseable_gherkin_structure")
     return issues
 
@@ -361,7 +390,9 @@ def convert_test_to_bdd(
     title = (tc.title or "").strip()
     steps = [str(s).strip() for s in (tc.steps or []) if str(s).strip()]
     expected = (tc.expected_result or "").strip()
-    feature = feature_name or (tc.graph_path[0] if tc.graph_path else "Generated Feature")
+    feature = feature_name or (
+        tc.graph_path[0] if tc.graph_path else "Generated Feature"
+    )
 
     if not title:
         return None, "needs_revision", ["missing_title"]
@@ -384,7 +415,9 @@ def convert_test_to_bdd(
 
     bdd_steps: list[BDDStep] = []
     if given_texts:
-        bdd_steps.append(BDDStep(keyword="Given", text=_as_state_clause(given_texts[0])))
+        bdd_steps.append(
+            BDDStep(keyword="Given", text=_as_state_clause(given_texts[0]))
+        )
         for text in given_texts[1:]:
             bdd_steps.append(BDDStep(keyword="And", text=_as_state_clause(text)))
     bdd_steps.append(BDDStep(keyword="When", text=_as_action_clause(when_texts[0])))
@@ -405,7 +438,9 @@ def convert_test_to_bdd(
         scenario_type="scenario",
         tags=[],
         steps=bdd_steps,
-        priority=str(tc.priority.value if hasattr(tc.priority, "value") else tc.priority),
+        priority=str(
+            tc.priority.value if hasattr(tc.priority, "value") else tc.priority
+        ),
         test_type=tc.category or "functional",
         classification=None,
         graph_path=list(tc.graph_path or []),
@@ -461,8 +496,12 @@ def _as_state_clause(text: str) -> str:
 
 def _as_action_clause(text: str) -> str:
     cleaned = text.strip().rstrip(".")
-    cleaned = re.sub(r"^(navigate to entry point:\s*)", "the user navigates to ", cleaned, flags=re.I)
-    cleaned = re.sub(r"^(traverse\s*/\s*exercise:\s*)", "the user exercises ", cleaned, flags=re.I)
+    cleaned = re.sub(
+        r"^(navigate to entry point:\s*)", "the user navigates to ", cleaned, flags=re.I
+    )
+    cleaned = re.sub(
+        r"^(traverse\s*/\s*exercise:\s*)", "the user exercises ", cleaned, flags=re.I
+    )
     if re.match(r"^(the\s+user|user)\b", cleaned, re.I):
         return cleaned
     if _ACTIONISH.match(cleaned):
@@ -508,7 +547,9 @@ def build_generated_artifacts(
             bdd, status, notes = convert_test_to_bdd(tc, feature_name=feature_name)
             if bdd is None:
                 needs_revision += 1
-                validation_errors.append(f"{tc.test_case_id}:conversion_failed:{','.join(notes)}")
+                validation_errors.append(
+                    f"{tc.test_case_id}:conversion_failed:{','.join(notes)}"
+                )
             else:
                 issues = validate_bdd_scenario(
                     bdd,
@@ -518,9 +559,13 @@ def build_generated_artifacts(
                 )
                 if issues:
                     bdd.conversion_status = "needs_revision"
-                    bdd.conversion_notes = list(dict.fromkeys((bdd.conversion_notes or []) + issues))
+                    bdd.conversion_notes = list(
+                        dict.fromkeys((bdd.conversion_notes or []) + issues)
+                    )
                     needs_revision += 1
-                    validation_errors.append(f"{tc.test_case_id}:{','.join(issues[:4])}")
+                    validation_errors.append(
+                        f"{tc.test_case_id}:{','.join(issues[:4])}"
+                    )
                 else:
                     converted += 1
                 scenarios.append(bdd)
@@ -542,7 +587,9 @@ def build_generated_artifacts(
                 source_test_id=tc.test_case_id,
                 graph_path=list(tc.graph_path or []),
                 evidence=list(tc.evidence or []),
-                priority=str(tc.priority.value if hasattr(tc.priority, "value") else tc.priority),
+                priority=str(
+                    tc.priority.value if hasattr(tc.priority, "value") else tc.priority
+                ),
                 generation_method=tc.generation_method,
             )
         )
