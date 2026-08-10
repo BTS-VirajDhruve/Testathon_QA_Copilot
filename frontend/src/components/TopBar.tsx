@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FolderPlus, Loader2, MoreVertical, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, FolderPlus, Loader2, MoreVertical, Sparkles, Trash2 } from "lucide-react";
 import type { HealthStatus, Project } from "@/lib/types";
 
 export function TopBar({
@@ -14,6 +14,14 @@ export function TopBar({
   busy,
   health,
   apiUrl,
+  canManageUsers = false,
+  onManageUsers,
+  userDisplayName = "QA User",
+  userInitials = "QA",
+  onAccountSettings,
+  onChangePassword,
+  onLogout,
+  defaultUserMenuOpen = false,
 }: {
   projects: Project[];
   projectId: string;
@@ -24,22 +32,34 @@ export function TopBar({
   busy: boolean;
   health: HealthStatus | null;
   apiUrl?: string;
+  canManageUsers?: boolean;
+  onManageUsers?: () => void;
+  userDisplayName?: string;
+  userInitials?: string;
+  onAccountSettings?: () => void;
+  onChangePassword?: () => void;
+  onLogout?: () => Promise<void> | void;
+  defaultUserMenuOpen?: boolean;
 }) {
   const [showDiag, setShowDiag] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(defaultUserMenuOpen);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const selected = projects.find((p) => p.id === projectId) || null;
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+      if (!userMenuRef.current?.contains(e.target as Node)) setUserMenuOpen(false);
     }
-    if (menuOpen) document.addEventListener("mousedown", onDocClick);
+    if (menuOpen || userMenuOpen) document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [menuOpen]);
+  }, [menuOpen, userMenuOpen]);
 
   async function confirmDelete() {
     if (!selected || deleting) return;
@@ -56,9 +76,20 @@ export function TopBar({
     }
   }
 
+  async function handleLogout() {
+    if (!onLogout || loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await onLogout();
+      setUserMenuOpen(false);
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <header className="sticky top-0 z-30 border-b border-ink-700/10 bg-mist-50/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-5 py-3">
+      <div className="flex w-full flex-wrap items-center gap-3 px-3 py-3 sm:px-4 lg:px-5">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ink-900 text-brass-400">
             <Sparkles className="h-5 w-5" />
@@ -120,6 +151,11 @@ export function TopBar({
           <button className="btn-secondary" onClick={onCreateProject} disabled={busy}>
             <FolderPlus className="h-4 w-4" /> New
           </button>
+          {canManageUsers && onManageUsers ? (
+            <button className="btn-secondary" onClick={onManageUsers} disabled={busy}>
+              Manage Users
+            </button>
+          ) : null}
         </div>
 
         <div className="ml-auto flex items-center gap-2 text-xs text-ink-600/70">
@@ -142,13 +178,64 @@ export function TopBar({
               {health.openai_client_ready ? "OpenAI ready" : "Deterministic fallback"}
             </span>
           ) : null}
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-pine-700 text-xs font-medium text-white">
-            QA
+          <div className="relative" ref={userMenuRef}>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-full border border-ink-700/10 bg-white/80 px-2 py-1 text-xs font-medium text-ink-800 hover:bg-white"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((value) => !value)}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-pine-700 text-[11px] font-semibold text-white">
+                {userInitials}
+              </span>
+              <span className="hidden sm:inline">{userDisplayName}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-ink-600" />
+            </button>
+            {userMenuOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 z-40 mt-1 min-w-[220px] rounded-xl border border-ink-700/10 bg-white py-1 shadow-soft"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-sm text-ink-800 hover:bg-ink-700/5"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onAccountSettings?.();
+                  }}
+                >
+                  View/Edit Profile
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-sm text-ink-800 hover:bg-ink-700/5"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onChangePassword?.();
+                  }}
+                >
+                  Change Password
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={loggingOut}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-signal-high hover:bg-signal-high/10 disabled:cursor-not-allowed disabled:opacity-70"
+                  onClick={handleLogout}
+                >
+                  {loggingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Logout
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
       {showDiag ? (
-        <div className="border-t border-ink-700/10 bg-white/90 px-5 py-2 text-xs text-ink-700/80">
+        <div className="border-t border-ink-700/10 bg-white/90 px-3 py-2 text-xs text-ink-700/80 sm:px-4 lg:px-5">
           {apiUrl ? <span className="mr-4">API: {apiUrl}</span> : null}
           {health ? (
             <>

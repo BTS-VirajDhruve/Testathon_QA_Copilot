@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "development"
-    api_host: str = "0.0.0.0"
+    api_host: str = "localhost"
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     log_level: str = "INFO"
@@ -104,6 +104,21 @@ class Settings(BaseSettings):
     neo4j_password: str = "password"
     neo4j_enabled: bool = False
 
+    # MongoDB
+    mongo_enabled: bool = False
+    mongo_required: bool = False
+    mongo_uri: str = "mongodb://localhost:27017"
+    mongo_db_name: str = "qa_copilot"
+    mongo_connect_timeout_ms: int = 1500
+
+    # Auth / JWT
+    jwt_issuer: str = "agentic-qa-copilot"
+    jwt_access_secret: str = "change-me-access-secret"
+    jwt_refresh_secret: str = "change-me-refresh-secret"
+    jwt_access_token_minutes: int = 30
+    jwt_refresh_token_days: int = 14
+    forgot_password_token_expire_minutes: int = 30
+
     # Relative paths resolve against BACKEND_ROOT (not process cwd).
     data_dir: str = "./data"
     chroma_dir: str = "./data/chroma"
@@ -138,7 +153,11 @@ class Settings(BaseSettings):
 
     @property
     def atlassian_scope_list(self) -> list[str]:
-        return [s.strip() for s in self.atlassian_oauth_scopes.replace(",", " ").split() if s.strip()]
+        return [
+            s.strip()
+            for s in self.atlassian_oauth_scopes.replace(",", " ").split()
+            if s.strip()
+        ]
 
     @property
     def atlassian_data_dir(self) -> Path:

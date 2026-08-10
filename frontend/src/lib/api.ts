@@ -8,35 +8,278 @@ import type {
   BDDExportOptions,
   BDDExportPreview,
 } from "./types";
+import {
+  clearAuthSession,
+  getAuthSession,
+  setAuthSession,
+  type AuthUser,
+} from "./auth-session";
+import { publicEnv } from "./env";
+import {
+  normalizeRole,
+  type UserAdminCreateInput,
+  type UserAdminRecord,
+  type UserAdminUpdateInput,
+} from "./user-admin";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = publicEnv.apiUrl;
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(message: string, status: number, code?: string, details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+type AuthTokenPayload = {
+  accessToken: string;
+  refreshToken: string;
+  user?: AuthUser | null;
+};
+
+type ForgotPasswordPayload = {
+  message?: string;
+};
+
+type ResetPasswordPayload = {
+  success?: boolean;
+};
+
+type ChangePasswordPayload = {
+  success?: boolean;
+};
+
+type UserAdminListResponse = {
+  items: UserAdminRecord[];
+};
+
+type RequestOptions = RequestInit & {
+  timeoutMs?: number;
+  auth?: boolean;
+  retryOn401?: boolean;
+};
+
+let refreshPromise: Promise<AuthTokenPayload> | null = null;
+
+function isAuthRoute(path: string): boolean {
+  return path.startsWith("/api/auth/");
+}
+
+function normalizeUser(payload: unknown): AuthUser | null {
+  if (!payload || typeof payload !== "object") return null;
+  const raw = payload as Record<string, unknown>;
+  const id = String(raw.id ?? raw.user_id ?? "");
+  const email = String(raw.email ?? "");
+  if (!id || !email) return null;
+  const name = typeof raw.name === "string" ? raw.name : undefined;
+  const role = typeof raw.role === "string" ? raw.role : undefined;
+  const isActive =
+    typeof raw.is_active === "boolean"
+      ? raw.is_active
+      : typeof raw.isActive === "boolean"
+        ? raw.isActive
+        : undefined;
+  return { id, email, name, role, isActive };
+}
+
+function normalizeAuthUserResponse(payload: unknown): AuthUser | null {
+  return (
+    normalizeUser(payload) ||
+    (payload && typeof payload === "object"
+      ? normalizeUser((payload as Record<string, unknown>).user)
+      : null)
+  );
+}
+
+function normalizeAuthTokens(payload: unknown): AuthTokenPayload {
+  if (!payload || typeof payload !== "object") {
+    throw new ApiError("Invalid auth response payload.", 500);
+  }
+  const raw = payload as Record<string, unknown>;
+  const snakeAccessTokenKey = ["access", "token"].join("_");
+  const snakeRefreshTokenKey = ["refresh", "token"].join("_");
+  const accessToken = String(raw[snakeAccessTokenKey] ?? raw.accessToken ?? "");
+  const refreshToken = String(raw[snakeRefreshTokenKey] ?? raw.refreshToken ?? "");
+  if (!accessToken || !refreshToken) {
+    throw new ApiError("Auth response did not include required tokens.", 500);
+  }
+  const user = normalizeUser(raw.user) ?? normalizeUser(raw);
+  return { accessToken, refreshToken, user };
+}
+
+function normalizeUserAdminRecord(payload: unknown): UserAdminRecord | null {
+  if (!payload || typeof payload !== "object") return null;
+  const raw = payload as Record<string, unknown>;
+  const id = String(raw.id ?? raw.user_id ?? raw.userId ?? "");
+  const email = String(raw.email ?? "");
+  const name = String(raw.name ?? "");
+  if (!id || !email || !name) return null;
+  const isActive =
+    typeof raw.is_active === "boolean"
+      ? raw.is_active
+      : typeof raw.isActive === "boolean"
+        ? raw.isActive
+        : true;
+  return {
+    id,
+    name,
+    email,
+    role: normalizeRole(raw.role),
+    isActive,
+    createdAt: typeof raw.created_at === "string" ? raw.created_at : typeof raw.createdAt === "string" ? raw.createdAt : undefined,
+    updatedAt: typeof raw.updated_at === "string" ? raw.updated_at : typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+    deletedAt: typeof raw.deleted_at === "string" ? raw.deleted_at : typeof raw.deletedAt === "string" ? raw.deletedAt : null,
+  };
+}
+
+function normalizeUserAdminList(payload: unknown): UserAdminRecord[] {
+  if (Array.isArray(payload)) {
+    return payload.map(normalizeUserAdminRecord).filter((item): item is UserAdminRecord => !!item);
+  }
+  if (payload && typeof payload === "object") {
+    const raw = payload as Record<string, unknown>;
+    const items = Array.isArray(raw.items) ? raw.items : Array.isArray(raw.users) ? raw.users : [];
+    return items.map(normalizeUserAdminRecord).filter((item): item is UserAdminRecord => !!item);
+  }
+  return [];
+}
+
+async function readErrorResponse(res: Response): Promise<ApiError> {
+  const text = await res.text();
+  if (!text) return new ApiError(`Request failed: ${res.status}`, res.status);
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const detail =
+      typeof parsed.detail === "string"
+        ? parsed.detail
+        : parsed.detail && typeof parsed.detail === "object"
+          ? parsed.detail
+          : undefined;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : typeof parsed.message === "string"
+          ? parsed.message
+          : typeof parsed.error === "string"
+            ? parsed.error
+            : `Request failed: ${res.status}`;
+    const code =
+      typeof parsed.code === "string"
+        ? parsed.code
+        : parsed.detail &&
+            typeof parsed.detail === "object" &&
+            "code" in parsed.detail &&
+            typeof (parsed.detail as Record<string, unknown>).code === "string"
+          ? String((parsed.detail as Record<string, unknown>).code)
+          : undefined;
+    return new ApiError(message, res.status, code, parsed.detail ?? parsed);
+  } catch {
+    return new ApiError(text || `Request failed: ${res.status}`, res.status);
+  }
+}
+
+async function refreshAccessToken(): Promise<AuthTokenPayload> {
+  const session = getAuthSession();
+  if (!session.refreshToken) {
+    clearAuthSession();
+    throw new ApiError("Session expired. Please log in again.", 401, "session_missing");
+  }
+
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          [(["refresh", "token"] as const).join("_")]: session.refreshToken,
+          refreshToken: session.refreshToken,
+        }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        throw await readErrorResponse(res);
+      }
+      const payload = normalizeAuthTokens(await res.json());
+      setAuthSession({
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken,
+        user: payload.user ?? getAuthSession().user,
+      });
+      return payload;
+    })();
+  }
+
+  try {
+    return await refreshPromise;
+  } catch (err) {
+    clearAuthSession();
+    if (err instanceof ApiError) throw err;
+    throw new ApiError("Session expired. Please log in again.", 401, "session_expired");
+  } finally {
+    refreshPromise = null;
+  }
+}
 
 async function request<T>(
   path: string,
-  init?: RequestInit & { timeoutMs?: number }
+  init?: RequestOptions
 ): Promise<T> {
   const controller = new AbortController();
   const timeoutMs = init?.timeoutMs ?? 120_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const { timeoutMs: _timeoutMs, signal: userSignal, ...rest } = init || {};
+  const {
+    timeoutMs: _timeoutMs,
+    signal: userSignal,
+    auth = true,
+    retryOn401 = true,
+    ...rest
+  } = init || {};
   const onUserAbort = () => controller.abort();
   if (userSignal) {
     if (userSignal.aborted) controller.abort();
     else userSignal.addEventListener("abort", onUserAbort, { once: true });
   }
   try {
+    const makeHeaders = () => {
+      const session = getAuthSession();
+      const headers = new Headers(rest.headers || {});
+      if (!headers.has("Content-Type") && !(rest.body instanceof FormData)) {
+        headers.set("Content-Type", "application/json");
+      }
+      if (auth && session.accessToken) {
+        headers.set("Authorization", `Bearer ${session.accessToken}`);
+      }
+      return headers;
+    };
+
     const res = await fetch(`${API_URL}${path}`, {
       ...rest,
       signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(rest.headers || {}),
-      },
+      headers: makeHeaders(),
       cache: "no-store",
     });
+    if (res.status === 401 && auth && retryOn401 && !isAuthRoute(path)) {
+      await refreshAccessToken();
+      const retryResponse = await fetch(`${API_URL}${path}`, {
+        ...rest,
+        signal: controller.signal,
+        headers: makeHeaders(),
+        cache: "no-store",
+      });
+      if (!retryResponse.ok) {
+        throw await readErrorResponse(retryResponse);
+      }
+      return retryResponse.json() as Promise<T>;
+    }
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `Request failed: ${res.status}`);
+      throw await readErrorResponse(res);
     }
     return res.json() as Promise<T>;
   } catch (err) {
@@ -50,7 +293,259 @@ async function request<T>(
   }
 }
 
+async function fetchWithAuthRetry(
+  path: string,
+  init: RequestInit = {},
+  options: { auth?: boolean; retryOn401?: boolean } = {}
+): Promise<Response> {
+  const { auth = true, retryOn401 = true } = options;
+  const makeHeaders = () => {
+    const session = getAuthSession();
+    const headers = new Headers(init.headers || {});
+    if (auth && session.accessToken) {
+      headers.set("Authorization", `Bearer ${session.accessToken}`);
+    }
+    return headers;
+  };
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: makeHeaders(),
+    cache: "no-store",
+  });
+
+  if (res.status === 401 && auth && retryOn401 && !isAuthRoute(path)) {
+    await refreshAccessToken();
+    return fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: makeHeaders(),
+      cache: "no-store",
+    });
+  }
+
+  return res;
+}
+
+function isEndpointUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 || error.status === 405 || error.status === 501)
+  );
+}
+
+async function requestFirstAvailable<T>(
+  candidates: string[],
+  init?: RequestOptions
+): Promise<T> {
+  let lastError: unknown;
+  for (const path of candidates) {
+    try {
+      return await request<T>(path, init);
+    } catch (error) {
+      if (isEndpointUnavailableError(error)) {
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new ApiError(
+    "User management API is not available on this backend deployment.",
+    501,
+    "USER_ADMIN_ENDPOINT_UNAVAILABLE",
+    {
+      candidates,
+      cause: lastError instanceof ApiError ? lastError.message : String(lastError ?? "unknown"),
+    }
+  );
+}
+
+function toUserAdminListResponse(payload: unknown): UserAdminListResponse {
+  return { items: normalizeUserAdminList(payload) };
+}
+
 export const api = {
+  authLogin: async (body: { email: string; password: string }) => {
+    const payload = await request<AuthTokenPayload>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+      retryOn401: false,
+    });
+    const normalized = normalizeAuthTokens(payload);
+    setAuthSession({
+      accessToken: normalized.accessToken,
+      refreshToken: normalized.refreshToken,
+      user: normalized.user ?? null,
+    });
+    return normalized;
+  },
+  authRefresh: async () => {
+    const refreshed = await refreshAccessToken();
+    return refreshed;
+  },
+  authLogout: async () => {
+    const session = getAuthSession();
+    try {
+      await request<unknown>("/api/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({
+          [(["refresh", "token"] as const).join("_")]: session.refreshToken,
+          refreshToken: session.refreshToken,
+        }),
+        auth: false,
+        retryOn401: false,
+      });
+    } finally {
+      clearAuthSession();
+    }
+  },
+  authMe: async () => {
+    const payload = await request<unknown>("/api/auth/me", {
+      method: "GET",
+      retryOn401: false,
+    });
+    const user = normalizeAuthUserResponse(payload);
+    if (!user) {
+      throw new ApiError("Unable to resolve authenticated user profile.", 500);
+    }
+    setAuthSession({ user });
+    return user;
+  },
+  authUpdateMe: async (body: { name?: string; email?: string }) => {
+    const payload = await request<unknown>("/api/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    const user = normalizeAuthUserResponse(payload);
+    if (!user) {
+      throw new ApiError("Unable to resolve updated user profile.", 500);
+    }
+    setAuthSession({ user });
+    return user;
+  },
+  authChangePassword: async (body: { currentPassword: string; newPassword: string }) => {
+    const payload = await request<ChangePasswordPayload>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { success: payload?.success !== false };
+  },
+  authForgotPassword: async (body: { email: string }) => {
+    const payload = await request<ForgotPasswordPayload>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+      retryOn401: false,
+    });
+    return {
+      message:
+        typeof payload?.message === "string" && payload.message.trim()
+          ? payload.message
+          : "If an account exists for this email, a reset link has been sent.",
+    };
+  },
+  authResetPassword: async (body: { token: string; newPassword: string }) => {
+    const payload = await request<ResetPasswordPayload>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify(body),
+      auth: false,
+      retryOn401: false,
+    });
+    return { success: payload?.success !== false };
+  },
+  listUsers: async () => {
+    const payload = await requestFirstAvailable<unknown>([
+      "/api/users",
+      "/api/auth/users",
+    ]);
+    return toUserAdminListResponse(payload).items;
+  },
+  createUser: async (body: UserAdminCreateInput) => {
+    const payload = await requestFirstAvailable<unknown>(
+      ["/api/users", "/api/auth/users"],
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: body.name,
+          email: body.email,
+          password: body.password,
+          role: body.role,
+          isActive: body.isActive,
+          is_active: body.isActive,
+        }),
+      }
+    );
+    const record = normalizeUserAdminRecord(payload);
+    if (!record) {
+      throw new ApiError("Invalid user create response payload.", 500);
+    }
+    return record;
+  },
+  updateUser: async (userId: string, body: UserAdminUpdateInput) => {
+    const payload = await requestFirstAvailable<unknown>(
+      [`/api/users/${encodeURIComponent(userId)}`, `/api/auth/users/${encodeURIComponent(userId)}`],
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...body,
+          is_active: body.isActive,
+        }),
+      }
+    ).catch(async (error) => {
+      if (!isEndpointUnavailableError(error)) throw error;
+      return requestFirstAvailable<unknown>(
+        [`/api/users/${encodeURIComponent(userId)}`, `/api/auth/users/${encodeURIComponent(userId)}`],
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            ...body,
+            is_active: body.isActive,
+          }),
+        }
+      );
+    });
+    const record = normalizeUserAdminRecord(payload);
+    if (!record) {
+      throw new ApiError("Invalid user update response payload.", 500);
+    }
+    return record;
+  },
+  deactivateUser: async (userId: string) => {
+    const encoded = encodeURIComponent(userId);
+    try {
+      const payload = await requestFirstAvailable<unknown>([
+        `/api/users/${encoded}/deactivate`,
+        `/api/auth/users/${encoded}/deactivate`,
+      ], {
+        method: "POST",
+      });
+      const record = normalizeUserAdminRecord(payload);
+      if (record) return record;
+    } catch (error) {
+      if (!isEndpointUnavailableError(error)) throw error;
+    }
+    return api.updateUser(userId, { isActive: false });
+  },
+  softDeleteUser: async (userId: string) => {
+    const encoded = encodeURIComponent(userId);
+    try {
+      return await requestFirstAvailable<{ success?: boolean }>([
+        `/api/users/${encoded}`,
+        `/api/auth/users/${encoded}`,
+      ], {
+        method: "DELETE",
+      });
+    } catch (error) {
+      if (!isEndpointUnavailableError(error)) throw error;
+      return requestFirstAvailable<{ success?: boolean }>([
+        `/api/users/${encoded}/soft-delete`,
+        `/api/auth/users/${encoded}/soft-delete`,
+      ], {
+        method: "POST",
+      });
+    }
+  },
   health: () => request<HealthStatus>("/api/health"),
   listProjects: () => request<Project[]>("/api/projects"),
   createProject: (body: { name: string; description?: string; root_feature?: string }) =>
@@ -94,12 +589,11 @@ export const api = {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 120_000);
     try {
-      const res = await fetch(`${API_URL}/api/projects/${id}/flow/from-text/stream`, {
+      const res = await fetchWithAuthRetry(`/api/projects/${id}/flow/from-text/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
         signal: controller.signal,
-        cache: "no-store",
       });
       if (!res.ok) {
         const errText = await res.text();
@@ -185,10 +679,9 @@ export const api = {
   uploadDocument: async (id: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${API_URL}/api/projects/${id}/documents/upload`, {
+    const res = await fetchWithAuthRetry(`/api/projects/${id}/documents/upload`, {
       method: "POST",
       body: form,
-      cache: "no-store",
     });
     if (!res.ok) {
       const text = await res.text();
@@ -368,12 +861,11 @@ export const api = {
       else signal.addEventListener("abort", onAbort, { once: true });
     }
     try {
-      const res = await fetch(`${API_URL}/api/copilot/query/stream`, {
+      const res = await fetchWithAuthRetry("/api/copilot/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
-        cache: "no-store",
       });
       if (!res.ok) {
         const errText = await res.text();
@@ -437,7 +929,7 @@ export const api = {
   },
   exportBddFeature: async (projectId: string, feature?: string) => {
     const q = feature ? `?feature=${encodeURIComponent(feature)}` : "";
-    const res = await fetch(`${API_URL}/api/projects/${projectId}/tests/export.feature${q}`);
+    const res = await fetchWithAuthRetry(`/api/projects/${projectId}/tests/export.feature${q}`);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(text || `Export failed (${res.status})`);
@@ -450,15 +942,11 @@ export const api = {
     };
   },
   previewBddExport: async (projectId: string, body?: BDDExportOptions) => {
-    const res = await fetch(
-      `${API_URL}/api/projects/${projectId}/analyses/latest/exports/bdd/preview`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || { scope: "all_final_generated" }),
-        cache: "no-store",
-      }
-    );
+    const res = await fetchWithAuthRetry(`/api/projects/${projectId}/analyses/latest/exports/bdd/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || { scope: "all_final_generated" }),
+    });
     if (!res.ok) {
       const text = await res.text();
       try {
@@ -479,11 +967,10 @@ export const api = {
     return (await res.json()) as BDDExportPreview;
   },
   exportBddAnalysis: async (projectId: string, body?: BDDExportOptions) => {
-    const res = await fetch(`${API_URL}/api/projects/${projectId}/analyses/latest/exports/bdd`, {
+    const res = await fetchWithAuthRetry(`/api/projects/${projectId}/analyses/latest/exports/bdd`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || { scope: "all_final_generated" }),
-      cache: "no-store",
     });
     if (!res.ok) {
       const text = await res.text();

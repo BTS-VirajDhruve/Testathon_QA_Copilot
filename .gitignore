@@ -63,3 +63,4 @@ Desktop.ini
 .cursor/
 agent-tools/
 *.canvas.tsx.bak
+.history/

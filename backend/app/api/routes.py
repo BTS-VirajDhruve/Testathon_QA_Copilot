@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Iterator
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -17,9 +17,11 @@ from app.agents.bdd_export import (
     build_export_preview,
 )
 from app.agents.orchestrator import get_orchestrator
+from app.db.mongo import mongo_health_signal
 from app.graph.ingestion import get_flow_ingester
 from app.graph.store import get_graph_store
 from app.graph.traversal import get_coverage_engine, get_traversal
+from app.api.auth_dependencies import require_admin_user
 from app.models.schemas import (
     AutomationCapabilityProfile,
     AutomationReviewOverrideRequest,
@@ -91,6 +93,7 @@ def health() -> dict[str, Any]:
         atl_site = st.selected_site_name
     except Exception:  # noqa: BLE001
         pass
+    mongo = mongo_health_signal()
     return {
         "status": "ok",
         "openai": settings.has_openai,
@@ -110,6 +113,10 @@ def health() -> dict[str, Any]:
         "atlassian_connection_status": atl_status,
         "atlassian_selected_site": atl_site,
         "imported_atlassian_source_count": atl_count,
+        "mongo_enabled": mongo["enabled"],
+        "mongo_connected": mongo["connected"],
+        "mongo_status": mongo["status"],
+        "mongo_database": mongo["database"],
     }
 
 
@@ -861,8 +868,9 @@ def run_test_review(project_id: str) -> dict[str, Any]:
     return {"project_id": project_id, "analysis": result.model_dump(mode="json")}
 
 
-@router.post("/demo/seed")
+@router.post("/demo/seed", dependencies=[Depends(require_admin_user)])
 def seed_demo(force: bool = False) -> dict[str, Any]:
+    # TODO(auth MT-B5): apply role guards to user CRUD/admin endpoints once introduced.
     from seed.demo_seed import seed_signin_demo
 
     return seed_signin_demo(force=force)

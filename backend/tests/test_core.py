@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from app.models.auth import UserCreateInput
+from app.services.user_service import get_user_service
 
 # Isolate test store
 TEST_DATA = Path("/tmp/qa_copilot_test_data")
@@ -50,7 +53,23 @@ def _isolate_store(monkeypatch, tmp_path):
 def client():
     from app.main import create_app
 
-    return TestClient(create_app())
+    app_client = TestClient(create_app())
+    email = f"admin-{uuid4().hex[:8]}@example.com"
+    password = "SecurePass123!"
+    get_user_service().create_user(
+        UserCreateInput(
+            name="Core Test Admin",
+            email=email,
+            password=password,
+            role="admin",
+            isActive=True,
+        )
+    )
+    login = app_client.post("/api/auth/login", json={"email": email, "password": password})
+    assert login.status_code == 200
+    token = login.json()["accessToken"]
+    app_client.headers.update({"Authorization": f"Bearer {token}"})
+    return app_client
 
 
 def test_health(client):

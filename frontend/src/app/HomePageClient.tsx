@@ -15,6 +15,9 @@ import {
   X,
 } from "lucide-react";
 import { API_URL, api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { buildLoginHref } from "@/lib/auth-routing";
+import { canManageUsers } from "@/lib/user-admin";
 import type {
   DashboardStats,
   HealthStatus,
@@ -79,6 +82,7 @@ function LocationSync({ onLocation }: { onLocation: (next: AppLocation) => void 
 export function HomePageClient({ initialLocation }: { initialLocation: AppLocation }) {
   const router = useRouter();
   const pathname = usePathname() || "/";
+  const { status: authStatus, session } = useAuth();
 
   /** Seeded from the server-parsed URL so SSR HTML matches the first client render. */
   const [location, setLocation] = useState<AppLocation>(initialLocation);
@@ -161,6 +165,14 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
     () => projects.find((p) => p.id === projectId) || null,
     [projects, projectId]
   );
+  const userDisplayName = session.user?.name?.trim() || session.user?.email || "QA User";
+  const userInitials = userDisplayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("")
+    .slice(0, 2) || "QA";
 
   const scopedResult = useMemo(() => {
     if (!result || !projectId) return null;
@@ -282,13 +294,31 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
   }, [refreshProjects, selectProject]);
 
   useEffect(() => {
+    if (authStatus === "authenticated") return;
+    if (typeof window === "undefined") return;
+    const href = buildLoginHref(pathname, window.location.search);
+    router.replace(href);
+  }, [authStatus, pathname, router]);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
     connect();
     return () => {
       if (analysisAbortRef.current) analysisAbortRef.current.abort();
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authStatus, connect]);
+
+  if (authStatus !== "authenticated") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-hero-wash">
+        <div className="panel flex items-center gap-3 px-6 py-5 text-sm text-ink-700/80">
+          <Loader2 className="h-5 w-5 animate-spin text-pine-700" />
+          Redirecting to login...
+        </div>
+      </div>
+    );
+  }
 
   async function handleCreateProject() {
     const name = window.prompt("Project name", "New QA Project");
@@ -505,8 +535,18 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
         busy={busy || projectLoading}
         health={health}
         apiUrl={API_URL}
+        canManageUsers={canManageUsers(session.user?.role)}
+        onManageUsers={() => router.push("/users")}
+        userDisplayName={userDisplayName}
+        userInitials={userInitials}
+        onAccountSettings={() => router.push("/account")}
+        onChangePassword={() => router.push("/account/change-password")}
+        onLogout={async () => {
+          await api.authLogout();
+          router.replace(buildLoginHref(pathname, ""));
+        }}
       />
-      <div className="mx-auto flex max-w-[1600px] gap-5 px-5 pb-8 pt-5">
+      <div className="flex w-full gap-4 px-3 pb-8 pt-4 sm:px-4 lg:gap-5 lg:px-5">
         <Sidebar items={NAV} view={view} onChange={setView} />
         <main className="min-w-0 flex-1 space-y-5">
           {error && (
