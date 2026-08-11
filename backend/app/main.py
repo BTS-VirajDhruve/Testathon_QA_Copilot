@@ -158,3 +158,7 @@ def run() -> None:
         logger.info("server_interrupted")
     finally:
         logger.info("entrypoint_stopped")
+
+
+if __name__ == "__main__":
+    run()
