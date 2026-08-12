@@ -85,7 +85,7 @@ export function HomePageClient({ initialLocation }: { initialLocation: AppLocati
   const pathname = usePathname() || "/";
   const { status: authStatus, session } = useAuth();
 
-  /** Seeded from the server-parsed URL so SSR HTML matches the first client render. */
+  /** Seeded from a static default; URL state syncs after hydration via LocationSync. */
   const [location, setLocation] = useState<AppLocation>(initialLocation);
   const view = location.view;
   const resultSection = location.section;
