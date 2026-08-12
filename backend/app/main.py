@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,9 +50,7 @@ async def lifespan(_app: FastAPI):
             chroma_host=chroma_diag.get("chroma_host"),
             chroma_port=chroma_diag.get("chroma_port"),
             chroma_collection=chroma_diag.get("chroma_collection"),
-            graph_store_mode=(
-                "neo4j+mongo" if settings.neo4j_enabled else "mongo"
-            ),
+            graph_store_mode=("neo4j+mongo" if settings.neo4j_enabled else "mongo"),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("runtime_diagnostics_failed", error=str(exc)[:200])
@@ -70,6 +69,15 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    @app.get("/", tags=["system"])
+    def home() -> dict[str, str]:
+        return {
+            "message": "Agentic QA Copilot API",
+            "environment": settings.app_env,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=(
@@ -126,9 +134,7 @@ async def serve() -> None:
         proxy_headers=settings.uvicorn_proxy_headers,
         forwarded_allow_ips=settings.uvicorn_forwarded_allow_ips,
         timeout_keep_alive=settings.uvicorn_timeout_keep_alive_seconds,
-        timeout_graceful_shutdown=(
-            settings.uvicorn_timeout_graceful_shutdown_seconds
-        ),
+        timeout_graceful_shutdown=(settings.uvicorn_timeout_graceful_shutdown_seconds),
     )
     logger.info(
         "server_starting",
