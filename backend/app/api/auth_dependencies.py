@@ -60,7 +60,7 @@ def _extract_bearer_token(request: Request) -> str:
     return parts[1].strip()
 
 
-def _require_auth_service() -> AuthService:
+async def _require_auth_service() -> AuthService:
     settings = get_settings()
     mongo = mongo_health_signal()
     if not settings.mongo_enabled or not mongo.get("connected"):
@@ -86,7 +86,7 @@ async def _authenticate_request(
         return None
 
     token = _extract_bearer_token(request)
-    service = _require_auth_service()
+    service = await _require_auth_service()
     try:
         user = await service.get_user_from_access_token(token)
     except HTTPException as exc:

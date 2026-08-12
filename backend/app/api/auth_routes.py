@@ -29,7 +29,7 @@ from app.services.auth_service import AuthService, get_auth_service
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _require_auth_service() -> AuthService:
+async def _require_auth_service() -> AuthService:
     settings = get_settings()
     mongo = mongo_health_signal()
     if not settings.mongo_enabled or not mongo.get("connected"):
